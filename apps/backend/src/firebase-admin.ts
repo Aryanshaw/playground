@@ -1,7 +1,7 @@
 // firebase-admin.ts
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import serviceAccount from '../src/playground-50326-firebase-adminsdk-fbsvc-3e93d88010.json'; // Download this file
+import serviceAccount from '../src/playground-50326-firebase-adminsdk-fbsvc-3e93d88010.json';
 
 // Initialize Firebase Admin SDK only once
 let app;
