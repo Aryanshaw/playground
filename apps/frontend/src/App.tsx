@@ -1,6 +1,5 @@
-import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { UserProvider } from './contexts/UserContext';
 import Landing from './pages/Landing';
 import Auth from './pages/Auth';

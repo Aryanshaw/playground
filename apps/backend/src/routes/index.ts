@@ -5,170 +5,91 @@ import { PlaygroundDashboardRoute } from "./playground-dashboard";
 import { PlaygroundRoute } from "./playground";
 import { WaitingRoomRoute } from "./waiting-room";
 import client from "@repo/db/client";
-import jwt from "jsonwebtoken";
-import {compare, hash} from "../scrypt";
-import { AuthSchema } from "../types";
+import { getAuth } from "firebase-admin/auth";
+import { initializeApp, cert } from 'firebase-admin/app';
 
 export const router = Router();
 
-router.post("/signup", async (req, res) => {
-    const JwtSecret = process.env.JwtSecret;
-    try {
-      const { username, password, email } = AuthSchema.parse(req.body);
-      const HashingPassword = await hash(password);
+// Initialize Firebase Admin SDK (not client SDK)
+// You need to use your service account key here
+const admin = initializeApp({
+  credential: cert({
+    projectId: 'playground-50326',
+    // Add your service account credentials here
+    // You can download the service account key from Firebase Console
+    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') || "",
+  }),
+  projectId: 'playground-50326',
+});
 
-      if (!email || !username || !password) {
-        res.status(400).json({ message: "Please provide all the credentials." });
-        return;
-      }
-        
-      const existingUser = await client.user.findFirst({
-        where: {
-          OR: [
-            { username },
-            { email: email || undefined },
-          ],
-        },
-      });
-  
-      if (existingUser) {
-        const jwtToken = jwt.sign(
-          { id: existingUser.id, username: existingUser.username },
-          `Secret`,
-          { expiresIn: "1d" }
-        );
+/**
+ * SYNC FIREBASE USER TO LOCAL DATABASE
+ */
+router.post("/sync-user", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split("Bearer ")[1];
     
-        res.cookie("access_token", jwtToken, {
-          httpOnly: true,
-          secure: false,
-          sameSite: "lax",
-          maxAge: 1000 * 60 * 60 * 24,
-        });
+    if (!token) {
+      res.status(401).json({ error: "No token provided." });
+    }
 
-        console.log('token->',jwtToken);
-        res.status(401).json({ message: "Username or email already exists." });
-        return
-      }
-  
-      const verifiedCode = Math.floor(100000 + Math.random() * 900000); // 6-digit code
-      const verifiedCodeExpireTime = new Date(Date.now() + 3600000); // 1 hour
-  
-      const newPlayer = await client.user.create({
+    console.log("Received token:", token);
+
+    // Verify the Firebase ID token
+    const decoded = await getAuth().verifyIdToken(token || "");
+    console.log("Decoded token:", decoded);
+    
+    const { uid, email } = decoded;
+    const username = email?.split('@')[0]; // e.g. "john" from "john@example.com"
+
+    // Check if user already exists in database
+    let user = await client.user.findFirst({
+      where: { firebaseUid: uid }
+    });
+
+    if (!user) {
+      // Create new user in database
+      user = await client.user.create({
         data: {
-          username,
-          password: HashingPassword,
-          email,
-          verifiedCode,
-          verifiedCodeExpireTime,
-          isverified: false,
+          firebaseUid: uid,
+          email: email || "default@example.com",
+          name: username || "Anonymous",
+          isverified: decoded.email_verified || false,
         },
       });
-  
-      // Send email with code (replace this with actual mail service)
-      console.log(`Email to ${email}: Your verification code is ${verifiedCode}`);
-
-      res.status(201).json({
-        message: `${username} registered. Please verify your email.`,
+      console.log("Created new user:", user);
+    } else {
+      // Update existing user's verification status
+      user = await client.user.update({
+        where: { firebaseUid: uid },
+        data: {
+          isverified: decoded.email_verified || false,
+          name: username || user.name, // Update name if provided
+        },
       });
-      return;
-    } catch (error: any) {
-        console.error("Signup error:", error?.message || error);
-        res.status(400).json({ error: error?.message || "Something went wrong" });
-        return;
-      }
-});
-  
-router.post("/verify-email", async (req, res) => {
-    try {
-      const { email, code } = req.body;
-  
-      const user = await client.user.findUnique({
-        where: { email },
-      });
-  
-      if (!user) {
-        res.status(404).json({ message: "User not found." });
-        return 
-      }
-  
-      if (user.isverified) {
-        res.status(400).json({ message: "User already verified." });
-        return 
-      }
-  
-      const isCodeValid = user.verifiedCode === parseInt(code);
-      const isNotExpired = user.verifiedCodeExpireTime && new Date(user.verifiedCodeExpireTime) > new Date();
-  
-      if (isCodeValid && isNotExpired) {
-        await client.user.update({
-          where: { email },
-          data: { isverified: true },
-        });
-  
-        res.status(200).json({ message: "Email verified successfully." });
-        return;
-      }
-  
-      res.status(400).json({ message: "Invalid or expired code." });
-      return;
-    } catch (error: any) {
-        console.error("Signup error:", error?.message || error);
-        res.status(400).json({ error: error?.message || "Something went wrong" });
-        return;
-      }
-});
+      console.log("Updated existing user:", user);
+    }
 
-router.post("/signin", async (req, res) => {
-    const JwtSecret = process.env.JwtSecret;
-    console.log("jwt",JwtSecret);
+    res.status(200).json({ 
+      success: true,
+      user: {
+        id: user.id,
+        firebaseUid: user.firebaseUid,
+        email: user.email,
+        name: user.name,
+        isverified: user.isverified,
+      }
+    });
     
-    try {
-      const { username, password } = AuthSchema.parse(req.body);
-  
-      const existingUser = await client.user.findUnique({
-        where: { username },
-      });
-  
-      if (!existingUser) {
-        res.status(401).json({ message: "Invalid username" });
-        return;
-      }
-  
-      if (!existingUser.isverified) {
-        res.status(403).json({ message: "Please verify your email before logging in." });
-        return;
-      }
-
-      const isValidPassword = await compare(password, existingUser.password);      
-      if (!isValidPassword) {
-        res.status(401).json({ message: "Invalid password" });
-        return;
-      }
-  
-      const jwtToken = jwt.sign(
-        { id: existingUser.id, username: existingUser.username },`Secret`,
-        { expiresIn: "1d" }
-      );
-  
-      res.cookie("access_token", jwtToken, {
-        httpOnly: true,
-        secure: false,
-        sameSite: "lax",
-        maxAge: 1000 * 60 * 60 * 24,
-      });
-      
-      console.log('token->',jwtToken);
-  
-      console.log(`${username} logged in successfully`);
-      res.status(200).json({ message: "Login successful" });
-      return 
-    } catch (error: any) {
-        console.error("Signin error:", error?.message || error);
-        res.status(400).json({ error: error?.message || "Something went wrong" });
-        return;
-      }
+  } catch (err) {
+    console.error("Token verification failed:", err);
+    res.status(401).json({ 
+      error: "Invalid token",
+      details: err instanceof Error ? err.message : "Unknown error"
+    });
+  }
 });
-  
+
 
 router.use("/user-dashboard/",UserDashboardRoute)
 router.use("/playground/",PlaygroundRoute)

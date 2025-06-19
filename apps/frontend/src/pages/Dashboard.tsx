@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Trophy, Target, Clock, Zap, Users, LogOut, Play } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import ParticleBackground from '../components/ParticleBackground';
+import { getAuth, signOut as firebaseSignOut } from "firebase/auth";
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -14,9 +15,10 @@ const Dashboard: React.FC = () => {
     return null;
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await firebaseSignOut(getAuth()); // ✅ logout from Firebase
     setUser(null);
-    navigate('/');
+    navigate('/auth');
   };
 
   const winRate = Math.round((user.stats.wins / user.stats.totalMatches) * 100);
@@ -73,7 +75,7 @@ const Dashboard: React.FC = () => {
           {[
             { icon: Target, label: "Total Matches", value: user.stats.totalMatches, color: "from-blue-500 to-cyan-500" },
             { icon: Trophy, label: "Win Rate", value: `${winRate}%`, color: "from-green-500 to-emerald-500" },
-            { icon: Zap, label: "XP Points", value: user.stats.xp, color: "from-purple-500 to-pink-500" },
+            // { icon: Zap, label: "XP Points", value: user.stats.xp, color: "from-purple-500 to-pink-500" },
             { icon: Clock, label: "Best Time", value: `${user.stats.bestTime}s`, color: "from-orange-500 to-red-500" }
           ].map((stat, index) => (
             <motion.div
@@ -107,14 +109,14 @@ const Dashboard: React.FC = () => {
                 <span>Current Rank: #{user.stats.rank}</span>
                 <span>Next: #{user.stats.rank - 1}</span>
               </div>
-              <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
+              {/* <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
                 <motion.div
                   className="h-full bg-gradient-to-r from-cyan-500 to-purple-500"
                   initial={{ width: 0 }}
                   animate={{ width: `${(user.stats.xp % 1000) / 10}%` }}
                   transition={{ delay: 1, duration: 1 }}
                 />
-              </div>
+              </div> */}
             </div>
           </div>
         </motion.div>

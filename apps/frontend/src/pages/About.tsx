@@ -113,10 +113,10 @@ const About: React.FC = () => {
                       <p className="text-sm text-gray-300">Win Rate: {player.winRate}%</p>
                     </div>
                     
-                    <div className="text-right">
+                    {/* <div className="text-right">
                       <div className="text-xl font-bold text-cyan-400">{player.xp.toLocaleString()}</div>
                       <div className="text-sm text-gray-300">XP</div>
-                    </div>
+                    </div> */}
                   </div>
                 </motion.div>
               ))}

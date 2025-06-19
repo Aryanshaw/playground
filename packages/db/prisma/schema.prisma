@@ -12,12 +12,13 @@ datasource db {
 
 model User {
   id                      String     @id @default(uuid())
-  username                String     @unique
-  password                String
-  email                   String?    @unique
+  name                     String     @unique
+  password                String?
+  email                   String    @unique
   isverified              Boolean    @default(false)
   verifiedCode            Int?
   verifiedCodeExpireTime  DateTime?
+  firebaseUid             String    @unique
   
   playerOneTeams          Team[]     @relation("PlayerOneTeams")
   playerTwoTeams          Team[]     @relation("PlayerTwoTeams")
