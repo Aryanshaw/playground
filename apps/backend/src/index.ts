@@ -8,8 +8,13 @@ import cors from "cors";
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
-app.use(cors());
-
+app.use(cors({
+    origin: ['http://localhost:5173', 'http://localhost:3000'], // Add your frontend URLs
+    credentials: true, // This allows cookies and credentials
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  }));
+  
 const server = createServer(app);
 const io = new Server(server);
 app.set("io", io);

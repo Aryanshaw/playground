@@ -86,11 +86,14 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy",Middleware,async (req, re
         console.log("p2 info:",Difficulty,topic);
 
         // both the players should have same Difficulty and problem topic  {FIX THIS}
-        // if(codeData.difficulty != Difficulty && codeData.topic != topic){
-        //   res.status(400).json({success: false, message: "Both players must have the same difficulty and topic to join the match"});
-        //   return;
-        // }
-
+        // Uncomment and fix this validation
+        if(codeData.Difficulty[0] !== Difficulty[0] || codeData.Topic[0] !== topic[0]){
+          res.status(400).json({
+            success: false, 
+            message: "Both players must have the same difficulty and topic to join the match"
+          });
+          return;
+        }
         //create team in db
         const team = await client.team.create({
           data: {

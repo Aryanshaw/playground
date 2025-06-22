@@ -10,17 +10,22 @@ import { initializeApp, cert } from 'firebase-admin/app';
 
 export const router = Router();
 
-// Initialize Firebase Admin SDK (not client SDK)
-// You need to use your service account key here
+const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+if (!privateKey) {
+  throw new Error("FIREBASE_PRIVATE_KEY is not set or invalid.");
+}
+
 const admin = initializeApp({
   credential: cert({
     projectId: 'playground-50326',
-    // Add your service account credentials here
-    // You can download the service account key from Firebase Console
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') || "",
+    privateKey,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
   }),
   projectId: 'playground-50326',
 });
+
+console.log("Private Key (first 50 chars):", process.env.FIREBASE_PRIVATE_KEY?.slice(0, 50));
+console.log("Client Email:", process.env.FIREBASE_CLIENT_EMAIL);
 
 /**
  * SYNC FIREBASE USER TO LOCAL DATABASE
@@ -38,6 +43,21 @@ router.post("/sync-user", async (req, res) => {
     // Verify the Firebase ID token
     const decoded = await getAuth().verifyIdToken(token || "");
     console.log("Decoded token:", decoded);
+
+    // PRODUCITON
+    // res.cookie("token",token,{
+    //   httpOnly: true,
+    //   secure: process.env.NODE_ENV === "production",
+    //   sameSite: "strict"
+    // })
+
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: false, // Explicitly set to false for localhost
+      sameSite: "strict",
+      maxAge: 1000 * 60 * 60 * 24, // 1 day
+
+    });
     
     const { uid, email } = decoded;
     const username = email?.split('@')[0]; // e.g. "john" from "john@example.com"

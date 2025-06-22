@@ -20,10 +20,12 @@ import {
 import { initializeApp } from 'firebase/app';
 
 const firebaseConfig = {
-  apiKey: 'something',
-  authDomain: '',
-  projectId: '',
+  apiKey: import.meta.env.VITE_API_KEY,
+  authDomain: import.meta.env.VITE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_PROJECT_ID,
 };
+
+
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
