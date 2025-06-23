@@ -110,10 +110,11 @@ const Dashboard: React.FC = () => {
           Difficulty: [difficulty],
         }
       );
-      
+
       console.log("Response from backend:", response.data);
       alert("Successfully joined the match!");
       // Navigate to game or handle success
+      navigate("/playground")
     } catch (error: any) {
       console.error("Error joining match:", error.response?.data || error.message);
       if (error.response?.status === 401) {
@@ -418,7 +419,7 @@ const Dashboard: React.FC = () => {
         >
           <h2 className="text-xl font-bold mb-4 text-white">Quick Actions</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <motion.button
+            {/* <motion.button
               onClick={() => navigate("/practice")}
               className="flex items-center gap-3 p-4 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg text-white font-semibold hover:from-blue-400 hover:to-cyan-400 transition-all duration-300"
               whileHover={{ scale: 1.02, y: -2 }}
@@ -426,7 +427,7 @@ const Dashboard: React.FC = () => {
             >
               <Target className="w-5 h-5" />
               Practice Mode
-            </motion.button>
+            </motion.button> */}
             
             <motion.button
               onClick={() => navigate("/leaderboard")}
@@ -438,7 +439,7 @@ const Dashboard: React.FC = () => {
               Leaderboard
             </motion.button>
             
-            <motion.button
+            {/* <motion.button
               onClick={() => navigate("/matchmaking")}
               className="flex items-center gap-3 p-4 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg text-white font-semibold hover:from-purple-400 hover:to-pink-400 transition-all duration-300"
               whileHover={{ scale: 1.02, y: -2 }}
@@ -446,7 +447,7 @@ const Dashboard: React.FC = () => {
             >
               <Play className="w-5 h-5" />
               Find Match
-            </motion.button>
+            </motion.button> */}
           </div>
         </motion.div>
       </div>

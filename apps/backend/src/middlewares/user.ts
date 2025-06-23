@@ -52,4 +52,4 @@ async function FirebaseMiddleware(req: Request, res: Response, next: NextFunctio
     }
 }
 
-export default FirebaseMiddleware;
+export default FirebaseMiddleware;  

@@ -1,19 +1,17 @@
 import { Router } from "express";
-import Middleware from "../middlewares/user";
 import client from "@repo/db/client";
-import { v4 as uuidv4 } from "uuid";
-
-// logic so that P1 can send Joiningcode to P2 and if P2 join succeffully,
-// both will get notify if not P2 can send some msg error in joining
+import FirebaseMiddleware from "../middlewares/user";
 
 export const JoiningcodeMap = new Map(); // code -> { creatorId, expiry, matchId?, createdAt }
 
 export const PlaygroundDashboardRoute = Router();
 
-PlaygroundDashboardRoute.post("/match-with-your-buddy",Middleware,async (req, res) => {
+PlaygroundDashboardRoute.post("/match-with-your-buddy",FirebaseMiddleware,async (req, res) => {
 
     try {
+
       const userId = req.userId;
+      const name = req.userName
       const { action } = req.query;
       const { Difficulty,topic } = req.body;      
 
@@ -34,7 +32,7 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy",Middleware,async (req, re
       }     
 
       // CASE 2: Player wants to join using a code
-      // {FIX: both player has to have same topic and difficulty level, then only they are allowed to continue the match.}
+
       else if (action === "join") {
         const { code } = req.query;
 
@@ -85,8 +83,6 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy",Middleware,async (req, re
         console.log("codeData info", codeData.Difficulty, codeData.Topic);
         console.log("p2 info:",Difficulty,topic);
 
-        // both the players should have same Difficulty and problem topic  {FIX THIS}
-        // Uncomment and fix this validation
         if(codeData.Difficulty[0] !== Difficulty[0] || codeData.Topic[0] !== topic[0]){
           res.status(400).json({
             success: false, 
@@ -94,35 +90,60 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy",Middleware,async (req, re
           });
           return;
         }
+
+        const playerOneTeams = codeData.creatorId
+        const playerTwoTeams = userId
+
+        console.log("playerOneTeams",playerOneTeams);
+        console.log("playerTwoTeams",playerTwoTeams);
+        
+        await client.user.upsert({
+          where: { id: codeData.creatorId },
+          update: {},
+          create: {
+            id: codeData.creatorId,
+            name: name || "Default Name", // Replace with actual logic to provide a name
+            email: `${codeData.creatorId}@example.com`, 
+            firebaseUid: `firebase-${codeData.creatorId}`, 
+          },
+        });
+        
+        await client.user.upsert({
+          where: { id: userId },
+          create: {
+            id: userId,
+            name: name || "Default Name", // Replace with actual logic to provide a name
+            email: `${userId}@example.com`, // Replace with actual email logic
+            firebaseUid: `firebase-${userId}`, // Replace with actual Firebase UID logic
+          },
+          update: {}
+        });
+
         //create team in db
         const team = await client.team.create({
           data: {
-            playerOneId: codeData.creatorId,
-            playerTwoId: userId,
+            playerOneId: playerOneTeams,
+            playerTwoId: playerTwoTeams,
             joinCode: code as string,
             isPrivate: true,
           },
         });
 
         console.log("PL1",team.playerOneId,"PL2",team.playerTwoId);
-        
-        // Select a random question
-        // const question = await client.questionBank.findFirst({
-        //   orderBy: {
-        //     id: "desc", // Replace with a random order mechanism
-        //   },
-        //   take: 1,
-        // });
 
         const question = await client.questionBank.findFirst({
-          where:{
+          where: {
             tags: {
-              has: topic
+              hasSome: topic, // use hasSome for string[]
             },
-            difficulty: Difficulty
+            difficulty: {
+              equals: Difficulty[0], // if Difficulty is ['EASY'], get first item
+            },
           },
         });
-
+        
+        /**{DELETE QUESTION WHEN TAKEN BY A USER} */
+        
         // if(question){
         //   const deleteQuestion = await client.questionBank.delete({
         //     where:{
@@ -240,6 +261,7 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy",Middleware,async (req, re
         error: error?.message || "Something went wrong",
       });
     }
+    
   // Clean up expired codes every 10 min (example, put outside the route)
   setInterval(() => {
     const now = new Date();
