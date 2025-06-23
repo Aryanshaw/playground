@@ -5,7 +5,7 @@ import { Trophy, Target, Clock, LogOut, Play, Copy } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 import ParticleBackground from "../components/ParticleBackground";
 import { getAuth, signOut as firebaseSignOut } from "firebase/auth";
-import axios from "axios";
+import apiClient from "../utils/axiosConfig"; 
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -23,9 +23,13 @@ const Dashboard: React.FC = () => {
   }
 
   const handleLogout = async () => {
-    await firebaseSignOut(getAuth());
-    setUser(null);
-    navigate("/auth");
+    try {
+      await firebaseSignOut(getAuth());
+      setUser(null);
+      navigate("/auth");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   const winRate = Math.round((user.stats.wins / user.stats.totalMatches) * 100);
@@ -51,7 +55,6 @@ const Dashboard: React.FC = () => {
   ];
   
   const difficulties = ["EASY", "MEDIUM", "HARD"];
-  const url = 'http://localhost:3000/v1';
 
   // Create match code
   const handleCreateCode = async () => {
@@ -62,14 +65,11 @@ const Dashboard: React.FC = () => {
     
     setIsCreating(true);
     try {
-      const response = await axios.post(
-        `${url}/playground-dashboard/match-with-your-buddy?action=create`,
+      const response = await apiClient.post(
+        `/playground-dashboard/match-with-your-buddy?action=create`,
         {
           topic: [topic],
           Difficulty: [difficulty],
-        },
-        {
-          withCredentials: true,
         }
       );
       
@@ -78,7 +78,12 @@ const Dashboard: React.FC = () => {
       alert(`Match created! Share this code: ${response.data.joiningCode}`);
     } catch (error: any) {
       console.error("Error creating match:", error.response?.data || error.message);
-      alert("Failed to create match. Please try again.");
+      if (error.response?.status === 401) {
+        alert("Authentication failed. Please login again.");
+        handleLogout();
+      } else {
+        alert("Failed to create match. Please try again.");
+      }
     } finally {
       setIsCreating(false);
     }
@@ -98,14 +103,11 @@ const Dashboard: React.FC = () => {
 
     setIsJoining(true);
     try {
-      const response = await axios.post(
-        `${url}/playground-dashboard/match-with-your-buddy?action=join&code=${joinCode}`,
+      const response = await apiClient.post(
+        `/playground-dashboard/match-with-your-buddy?action=join&code=${joinCode}`,
         {
           topic: [topic],
           Difficulty: [difficulty],
-        },
-        {
-          withCredentials: true,
         }
       );
       
@@ -114,7 +116,12 @@ const Dashboard: React.FC = () => {
       // Navigate to game or handle success
     } catch (error: any) {
       console.error("Error joining match:", error.response?.data || error.message);
-      alert(error.response?.data?.message || "Failed to join match. Please try again.");
+      if (error.response?.status === 401) {
+        alert("Authentication failed. Please login again.");
+        handleLogout();
+      } else {
+        alert(error.response?.data?.message || "Failed to join match. Please try again.");
+      }
     } finally {
       setIsJoining(false);
     }
@@ -367,46 +374,80 @@ const Dashboard: React.FC = () => {
             ].map((match, index) => (
               <motion.div
                 key={index}
-                className="flex items-center justify-between p-3 bg-white/5 rounded-lg"
+                className="flex items-center justify-between p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-all duration-300"
                 initial={{ x: -50, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
                 transition={{ delay: 1.4 + index * 0.1 }}
+                whileHover={{ x: 5 }}
               >
                 <div className="flex items-center gap-3">
-                  <div
-                    className={`w-3 h-3 rounded-full ${match.result === "WIN" ? "bg-green-500" : "bg-red-500"}`}
-                  />
-                  <span className="text-white">vs {match.opponent}</span>
+                  <div className={`w-3 h-3 rounded-full ${
+                    match.result === 'WIN' ? 'bg-green-400' : 'bg-red-400'
+                  }`}></div>
+                  <div>
+                    <p className="text-white font-medium">vs {match.opponent}</p>
+                    <p className="text-gray-400 text-sm">{match.topic}</p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="text-gray-300">{match.time}</span>
-                  <span
-                    className={`font-semibold ${match.result === "WIN" ? "text-green-400" : "text-red-400"}`}
-                  >
-                    {match.xp}
-                  </span>
+                <div className="text-right">
+                  <p className={`font-semibold ${
+                    match.result === 'WIN' ? 'text-green-400' : 'text-red-400'
+                  }`}>
+                    {match.result}
+                  </p>
+                  <p className="text-gray-400 text-sm">{match.time}</p>
+                </div>
+                <div className={`px-2 py-1 rounded text-sm font-medium ${
+                  match.result === 'WIN' 
+                    ? 'bg-green-400/20 text-green-400' 
+                    : 'bg-red-400/20 text-red-400'
+                }`}>
+                  {match.xp}
                 </div>
               </motion.div>
             ))}
           </div>
         </motion.div>
 
-        {/* Public Match Button */}
+        {/* Quick Actions */}
         <motion.div
-          className="text-center"
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 1.6 }}
+          className="glass-effect rounded-xl p-6"
+          initial={{ y: 50, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 1.4 }}
         >
-          <motion.button
-            onClick={() => navigate("/matching")}
-            className="px-12 py-4 bg-gradient-to-r from-cyan-500 to-purple-600 rounded-full text-xl font-bold hover:from-cyan-400 hover:to-purple-500 transition-all duration-300 neon-border flex items-center gap-3 mx-auto"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <Play className="w-6 h-6" />
-            Find Public Match
-          </motion.button>
+          <h2 className="text-xl font-bold mb-4 text-white">Quick Actions</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <motion.button
+              onClick={() => navigate("/practice")}
+              className="flex items-center gap-3 p-4 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg text-white font-semibold hover:from-blue-400 hover:to-cyan-400 transition-all duration-300"
+              whileHover={{ scale: 1.02, y: -2 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Target className="w-5 h-5" />
+              Practice Mode
+            </motion.button>
+            
+            <motion.button
+              onClick={() => navigate("/leaderboard")}
+              className="flex items-center gap-3 p-4 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-lg text-white font-semibold hover:from-yellow-400 hover:to-orange-400 transition-all duration-300"
+              whileHover={{ scale: 1.02, y: -2 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Trophy className="w-5 h-5" />
+              Leaderboard
+            </motion.button>
+            
+            <motion.button
+              onClick={() => navigate("/matchmaking")}
+              className="flex items-center gap-3 p-4 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg text-white font-semibold hover:from-purple-400 hover:to-pink-400 transition-all duration-300"
+              whileHover={{ scale: 1.02, y: -2 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Play className="w-5 h-5" />
+              Find Match
+            </motion.button>
+          </div>
         </motion.div>
       </div>
     </motion.div>
