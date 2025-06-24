@@ -17,6 +17,15 @@ if (!privateKey) {
   throw new Error("FIREBASE_PRIVATE_KEY is not set or invalid.");
 }
 
+const admin = initializeApp({
+  credential: cert({
+    projectId: '',
+    privateKey,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
+  }),
+  projectId: '',
+});
+
 console.log("Private Key (first 50 chars):", process.env.FIREBASE_PRIVATE_KEY?.slice(0, 50));
 console.log("Client Email:", process.env.FIREBASE_CLIENT_EMAIL);
 

@@ -173,13 +173,12 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy",FirebaseMiddleware,async 
           },
         });
 
-        res.cookie("matchId",match.id, {
-          httpOnly: true,
-          secure: false,
+        res.cookie("matchId", match.id, {
+          httpOnly: false, // Allows JavaScript access
+          secure: false, // Set to true in production (HTTPS)
           sameSite: "lax",
           maxAge: 1000 * 60 * 60 * 24,
-        });
-  
+        });  
 
         // Update code data with match ID
         codeData.matchId = match.id;
@@ -237,6 +236,9 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy",FirebaseMiddleware,async 
             expiresAt: codeData.expiry,
           });
           return;
+
+
+        
         } else {
           res.status(403).json({
             success: false,

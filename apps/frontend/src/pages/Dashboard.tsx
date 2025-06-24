@@ -70,12 +70,14 @@ const Dashboard: React.FC = () => {
         {
           topic: [topic],
           Difficulty: [difficulty],
-        }
+        },
+        { withCredentials: true } // Include cookies in the request
       );
       
       console.log("Response from backend:", response.data);
       setJoiningCode(response.data.joiningCode);
       alert(`Match created! Share this code: ${response.data.joiningCode}`);
+      navigate("/playground");
     } catch (error: any) {
       console.error("Error creating match:", error.response?.data || error.message);
       if (error.response?.status === 401) {
@@ -108,7 +110,9 @@ const Dashboard: React.FC = () => {
         {
           topic: [topic],
           Difficulty: [difficulty],
-        }
+        },
+        { withCredentials: true } // Include cookies in the request
+
       );
 
       console.log("Response from backend:", response.data);
