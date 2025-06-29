@@ -11,14 +11,21 @@ app.use(cookieParser());
 app.use(
   cors({
     origin: ['*'], // Add your frontend URLs
-    credentials: false, // This allows cookies and credentials
+    credentials: true, // This allows cookies and credentials
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   }),
 );
 
 const server = createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  },
+});
 app.set('io', io);
 
 io.on('connection', socket => {

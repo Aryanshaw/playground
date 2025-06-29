@@ -4,7 +4,7 @@ import { getAuth } from 'firebase/auth';
 
 // Create axios instance
 const apiClient = axios.create({
-  baseURL: 'http://localhost:3001/v1',
+  baseURL: '/api/v1',
   withCredentials: false, // Important for cookies
 });
 

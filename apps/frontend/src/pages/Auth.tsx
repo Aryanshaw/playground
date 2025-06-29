@@ -31,7 +31,7 @@ console.log('VITE_API_KEY:', import.meta.env.VITE_API_KEY);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
-const url = 'http://localhost:3001/v1';
+const url = '/api/v1';
 
 const Auth: React.FC = () => {
   const navigate = useNavigate();
@@ -116,7 +116,7 @@ const Auth: React.FC = () => {
 
       const idToken = await user.getIdToken();
       await axios.post(
-        'http://localhost:3001/v1/sync-user',
+        '/api/v1/sync-user',
         {
           email: user.email,
           name: user.displayName || '',
