@@ -15,24 +15,23 @@ import {
   signInWithEmailAndPassword,
   sendEmailVerification,
   onAuthStateChanged,
-  User
+  User,
 } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_API_KEY || "",
-  authDomain: import.meta.env.VITE_AUTH_DOMAIN || "", 
-  projectId: import.meta.env.VITE_PROJECT_ID || ""
+  apiKey: import.meta.env.VITE_API_KEY || '',
+  authDomain: import.meta.env.VITE_AUTH_DOMAIN || '',
+  projectId: import.meta.env.VITE_PROJECT_ID || '',
 };
 
 console.log(firebaseConfig);
-console.log("VITE_API_KEY:", import.meta.env.VITE_API_KEY);
-
+console.log('VITE_API_KEY:', import.meta.env.VITE_API_KEY);
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
-const url = 'http://localhost:3000/v1';
+const url = 'http://localhost:3001/v1';
 
 const Auth: React.FC = () => {
   const navigate = useNavigate();
@@ -49,16 +48,20 @@ const Auth: React.FC = () => {
   const syncUserToBackend = async (user: User) => {
     try {
       const token = await user.getIdToken();
-      const response = await axios.post(`${url}/sync-user`, {
-        uid: user.uid,
-        email: user.email,
-        name: user.displayName || 'Anonymous',
-      }, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      
+      const response = await axios.post(
+        `${url}/sync-user`,
+        {
+          uid: user.uid,
+          email: user.email,
+          name: user.displayName || 'Anonymous',
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
       console.log('User synced to backend:', response.data);
       return response.data;
     } catch (error) {
@@ -85,7 +88,7 @@ const Auth: React.FC = () => {
         name: user.displayName || '',
         email: user.email || '',
         avatar: user.photoURL || '',
-        provider: 'google' ,
+        provider: 'google',
         stats: {
           totalMatches: 0,
           wins: 0,
@@ -106,29 +109,29 @@ const Auth: React.FC = () => {
     try {
       setLoading(true);
       setError('');
-      
+
       // Use popup for better UX
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
       const idToken = await user.getIdToken();
       await axios.post(
-        "http://localhost:3000/v1/sync-user", 
+        'http://localhost:3001/v1/sync-user',
         {
           email: user.email,
-          name: user.displayName || "",
+          name: user.displayName || '',
         },
         {
           headers: {
             Authorization: `Bearer ${idToken}`,
           },
-        }
+        },
       );
       // Directly handle the authenticated user
       await handleUserAuthenticated(user);
     } catch (error) {
       console.error('Google login failed:', error);
-      
+
       // Handle specific popup errors
       if ((error as { code: string }).code === 'auth/popup-closed-by-user') {
         setError('Sign-in cancelled.');
@@ -150,25 +153,29 @@ const Auth: React.FC = () => {
     try {
       setLoading(true);
       setError('');
-      
+
       const result = await createUserWithEmailAndPassword(auth, email, password);
       const user = result.user;
 
       // Send email verification
       await sendEmailVerification(user);
       setMessage('Verification email sent! Please check your email and verify your account.');
-      
+
       const token = await user.getIdToken();
-      const response = await axios.post(`${url}/sync-user`, {
-        uid: user.uid,
-        email: user.email,
-        name: user.displayName || 'Anonymous',
-      }, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      
+      const response = await axios.post(
+        `${url}/sync-user`,
+        {
+          uid: user.uid,
+          email: user.email,
+          name: user.displayName || 'Anonymous',
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
       console.log('User synced to backend:', response.data);
       return response.data;
       // Note: We don't automatically sign in until email is verified
@@ -191,10 +198,10 @@ const Auth: React.FC = () => {
     try {
       setLoading(true);
       setError('');
-      
+
       const result = await signInWithEmailAndPassword(auth, email, password);
       console.log(result);
-      
+
       // The onAuthStateChanged listener will handle the rest
     } catch (error) {
       console.error('Signin failed:', error);
@@ -206,18 +213,18 @@ const Auth: React.FC = () => {
   useEffect(() => {
     // Handle redirect result for Google sign-in
     getRedirectResult(auth)
-      .then((result) => {
+      .then(result => {
         if (result?.user) {
           handleUserAuthenticated(result.user);
         }
       })
-      .catch((error) => {
+      .catch(error => {
         console.error('Error during redirect login:', error);
         setError('Authentication failed. Please try again.');
       });
 
     // Listen for auth state changes
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, user => {
       if (user && user.emailVerified) {
         handleUserAuthenticated(user);
       } else if (user && !user.emailVerified && user.providerData[0]?.providerId === 'password') {
@@ -275,9 +282,7 @@ const Auth: React.FC = () => {
 
             {/* Error/Success Messages */}
             {error && (
-              <div className="mb-4 p-3 bg-red-500/20 border border-red-500 rounded-lg text-red-200">
-                {error}
-              </div>
+              <div className="mb-4 p-3 bg-red-500/20 border border-red-500 rounded-lg text-red-200">{error}</div>
             )}
             {message && (
               <div className="mb-4 p-3 bg-green-500/20 border border-green-500 rounded-lg text-green-200">
@@ -300,7 +305,7 @@ const Auth: React.FC = () => {
               </motion.button>
 
               <div className="text-gray-400 my-4">OR</div>
-              
+
               {/* Email & Password */}
               <motion.div
                 initial={{ x: -100, opacity: 0 }}
@@ -312,23 +317,23 @@ const Auth: React.FC = () => {
                   type="email"
                   placeholder="Enter your email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={e => setEmail(e.target.value)}
                   className="w-full px-6 py-4 bg-gradient-to-r from-gray-700 to-gray-900 rounded-xl font-semibold hover:from-gray-600 hover:to-gray-800 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-cyan-400"
                 />
                 <input
                   type="password"
                   placeholder="Enter your password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={e => setPassword(e.target.value)}
                   className="w-full px-6 py-4 bg-gradient-to-r from-gray-700 to-gray-900 rounded-xl font-semibold hover:from-gray-600 hover:to-gray-800 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-cyan-400"
                 />
-                
-                <button 
+
+                <button
                   className="w-full mt-3 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-xl font-semibold hover:from-cyan-400 hover:to-blue-400 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={isSignUp ? handleSignupWithEmail : handleSigninWithEmail}
                   disabled={loading}
                 >
-                  {loading ? 'Processing...' : (isSignUp ? 'Sign Up' : 'Sign In')}
+                  {loading ? 'Processing...' : isSignUp ? 'Sign Up' : 'Sign In'}
                 </button>
               </motion.div>
 
@@ -341,7 +346,7 @@ const Auth: React.FC = () => {
                 <span className="text-gray-400">
                   {isSignUp ? 'Already have an account?' : "Don't have an account?"}
                 </span>
-                <button 
+                <button
                   className="ml-2 text-cyan-400 hover:text-cyan-300 font-semibold transition-colors"
                   onClick={() => {
                     setIsSignUp(!isSignUp);
@@ -352,7 +357,7 @@ const Auth: React.FC = () => {
                   {isSignUp ? 'Sign In' : 'Sign Up'}
                 </button>
               </motion.div>
-            </div>      
+            </div>
 
             <motion.div
               className="mt-8 text-sm text-gray-400"
