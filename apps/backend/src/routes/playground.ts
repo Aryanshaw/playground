@@ -2,6 +2,7 @@ import { Router } from "express";
 import client from "@repo/db/client";
 import axios from "axios";
 import FirebaseMiddleware from "../middlewares/user";
+import wsServer from "../utils/WebSocketServer"; // Replace with the correct path to wsServer
 
 export const PlaygroundRoute = Router();
 
@@ -91,7 +92,7 @@ async function determineMatchWinner(matchId: string) {
         solutions: {
           include: {
             user: {
-              select: { id: true, username: true, email: true }
+              select: { id: true, email: true }
             }
           }
         },
@@ -418,6 +419,7 @@ PlaygroundRoute.post("/playground", FirebaseMiddleware, async (req, res) => {
       return;
     }
 
+
     // Create solution record first
     const SubmitCode = await client.solution.create({
       data: {
@@ -427,6 +429,17 @@ PlaygroundRoute.post("/playground", FirebaseMiddleware, async (req, res) => {
         user: { connect: { id: userId } }
       }
     });
+
+    if (SubmitCode.submittedAt) {
+      wsServer.notifyMatchCompleted(MatchId, {
+        userId: req.userId || "",
+        username: req.userName || "",
+        executionTime: SubmitCode.executionTime || 100,
+        passedTests: SubmitCode.passedTests,
+        totalTests: SubmitCode.totalTests
+      });
+    }
+
 
     let passedTests = 0;
     let totalTime = 0;

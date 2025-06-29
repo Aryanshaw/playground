@@ -8,6 +8,8 @@ import client from "@repo/db/client";
 import { getAuth } from "firebase-admin/auth";
 import { initializeApp, cert } from 'firebase-admin/app';
 import FirebaseMiddleware from "../middlewares/user"; // Import the fixed middleware
+import dotenv from 'dotenv';
+dotenv.config(); // 👈 this loads .env into process.env
 
 export const router = Router();
 
@@ -19,11 +21,11 @@ if (!privateKey) {
 
 const admin = initializeApp({
   credential: cert({
-    projectId: '',
+    projectId:  process.env.FIREBASE_CLIENT_PROJECT_ID ||'',
     privateKey,
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
   }),
-  projectId: '',
+  projectId: process.env.FIREBASE_CLIENT_PROJECT_ID || '',
 });
 
 console.log("Private Key (first 50 chars):", process.env.FIREBASE_PRIVATE_KEY?.slice(0, 50));
@@ -52,6 +54,7 @@ router.post("/sync-user", async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production", // Use secure in production
       sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax", // More flexible for development
+      // sameSite: "none",
       maxAge: 1000 * 60 * 60 * 24, // 1 day
       path: "/" // Ensure cookie is available for all routes
     });

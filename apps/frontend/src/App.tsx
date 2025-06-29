@@ -9,10 +9,12 @@ import Playground from './pages/Playground';
 import Result from './pages/Result';
 import About from './pages/About';
 import './App.css';
+import { WebSocketProvider } from './contexts/WebSocketContext';
 
 function App() {
   return (
     <UserProvider>
+      <WebSocketProvider>
       <Router>
         <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white">
           <AnimatePresence mode="wait">
@@ -28,6 +30,7 @@ function App() {
           </AnimatePresence>
         </div>
       </Router>
+      </WebSocketProvider>
     </UserProvider>
   );
 }

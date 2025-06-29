@@ -127,8 +127,8 @@ const Result: React.FC = () => {
               >
                 <div className="relative">
                   <motion.img
-                    src={result.winner.avatar}
-                    alt={result.winner.name}
+                    src={result.winner?.name}
+                    alt={result.winner?.name}
                     className={`w-32 h-32 rounded-full mx-auto mb-4 border-4 ${
                       result.isWinner ? 'border-yellow-400' : 'border-gray-400'
                     }`}
@@ -151,7 +151,7 @@ const Result: React.FC = () => {
                     </motion.div>
                   )}
                 </div>
-                <h3 className="text-2xl font-bold text-white mb-2">{result.winner.name}</h3>
+                <h3 className="text-2xl font-bold text-white mb-2">{result.winner?.name}</h3>
                 <div className="space-y-2 text-lg">
                   <div className="flex items-center justify-center gap-2">
                     <Target className="w-5 h-5 text-green-400" />

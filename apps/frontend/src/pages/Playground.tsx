@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Play, Clock, CheckCircle, XCircle, AlertCircle, Trophy, Users } from 'lucide-react';
+import { Play, CheckCircle, XCircle, AlertCircle, Trophy, Users } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import Editor from '@monaco-editor/react';
-import axios from 'axios';
 import apiClient from "../utils/axiosConfig"; 
+import { useWebSocketContext } from '../contexts/WebSocketContext';
+import { WebSocketNotifications } from '../components/WebSocketNotifications';
+import { WebSocketStatus } from '../components/WebSocketStatus';
 
 const Playground: React.FC = () => {
   const navigate = useNavigate();
@@ -21,52 +23,161 @@ const Playground: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submissionResult, setSubmissionResult] = useState<any>(null);
+  const { joinMatch, leaveMatch, shareJoiningCode, isConnected } = useWebSocketContext();
 
-  // Language templates
   const codeTemplates = {
-    PYTHON: `def solution():
-    # Write your solution here
-    pass
-
-# Test your solution
-
-if __name__ == "__main__":
-    result = solution()
-    print(result)`,
-    JAVASCRIPT: `function solution() {
-    // Write your solution here
-    
-}
-
-// Test your solution
-console.log(solution());`,
-    CPP: `#include <iostream>
-#include <vector>
-using namespace std;
-
-int main() {
-    // Write your solution here
-    
-    return 0;
-}`,
-    JAVA: `public class Solution {
-    public static void main(String[] args) {
-        // Write your solution here
-        
-    }
-}`,
-    C: `#include <stdio.h>
-
-int main() {
-    // Write your solution here
-    
-    return 0;
-}`
+    PYTHON: `
+  def solution(nums, target):
+      # Write your solution here
+      pass
+  
+  if __name__ == "__main__":
+      nums = list(map(int, input().strip("[]").split(",")))
+      target = int(input())
+      result = solution(nums, target)
+      print(result)
+  `,
+  
+    JAVASCRIPT: `
+  function solution(nums, target) {
+      // Write your solution here
+      return -1;
+  }
+  
+  // Read input from stdin
+  process.stdin.resume();
+  process.stdin.setEncoding('utf8');
+  let input = '';
+  
+  process.stdin.on('data', function (chunk) {
+      input += chunk;
+  });
+  
+  process.stdin.on('end', function () {
+      const lines = input.trim().split('\\n');
+      const nums = JSON.parse(lines[0]);
+      const target = parseInt(lines[1]);
+      console.log(solution(nums, target));
+  });
+  `,
+  
+    CPP: `
+  #include <iostream>
+  #include <vector>
+  #include <sstream>
+  using namespace std;
+  
+  int solution(vector<int>& nums, int target) {
+      // Write your solution here
+      return -1;
+  }
+  
+  int main() {
+      string line;
+      getline(cin, line); // Read "[1, 2, 3]"
+      line = line.substr(1, line.length() - 2); // remove [ ]
+      
+      vector<int> nums;
+      stringstream ss(line);
+      string temp;
+      while (getline(ss, temp, ',')) {
+          nums.push_back(stoi(temp));
+      }
+  
+      int target;
+      cin >> target;
+  
+      cout << solution(nums, target) << endl;
+      return 0;
+  }
+  `,
+  
+    JAVA: `
+  import java.util.*;
+  
+  public class Solution {
+      public static int solution(int[] nums, int target) {
+          // Write your solution here
+          return -1;
+      }
+  
+      public static void main(String[] args) {
+          Scanner sc = new Scanner(System.in);
+          String line = sc.nextLine().replaceAll("[\\[\\]\\s]", "");
+          String[] parts = line.split(",");
+          int[] nums = new int[parts.length];
+          for (int i = 0; i < parts.length; i++) {
+              nums[i] = Integer.parseInt(parts[i]);
+          }
+          int target = sc.nextInt();
+  
+          System.out.println(solution(nums, target));
+      }
+  }
+  `,
+  
+    C: `
+  #include <stdio.h>
+  #include <stdlib.h>
+  
+  int solution(int* nums, int size, int target) {
+      // Write your solution here
+      return -1;
+  }
+  
+  int main() {
+      char input[1000];
+      fgets(input, sizeof(input), stdin);
+  
+      int nums[1000], i = 0;
+      char* token = strtok(input, "[,] ");
+      while (token != NULL) {
+          nums[i++] = atoi(token);
+          token = strtok(NULL, "[,] ");
+      }
+  
+      int target;
+      scanf("%d", &target);
+  
+      printf("%d\\n", solution(nums, i, target));
+      return 0;
+  }
+  `
   };
 
   useEffect(() => {
     fetchMatchData();
-  }, []);
+  },[]);
+
+  // useEffect(() => {
+  //   if (match?.id && isConnected) {
+  //     joinMatch(match.id);
+  //   }
+    
+  //   return () => {
+  //     if (match?.id) {
+  //       leaveMatch(match.id);
+  //     }
+  //   };
+  // }, [match?.id, isConnected]);
+
+  useEffect(() => {
+    if (match?.id) {
+      joinMatch(match.id);
+    }
+  }, [match?.id]);
+  
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (code && match?.id && isConnected) {
+        shareJoiningCode(match.id, code);
+      }
+    }, 2000); // 2 second delay
+
+    return () => clearTimeout(timer);
+  }, [code, language, match?.id, isConnected]);
+  
 
   // useEffect(() => {
   //   if (match && match.timeLimit) {
@@ -97,6 +208,7 @@ int main() {
   //   }
   // }, [match]);
 
+  
   useEffect(() => {
     // Set initial code template when language changes
     if (codeTemplates[language as keyof typeof codeTemplates] && !code) {
@@ -107,22 +219,31 @@ int main() {
   const fetchMatchData = async () => {
     try {
       setLoading(true);
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(";").shift();
+        return null;
+      };      
+
+      console.log("Document matchId Cookies:", document.cookie);    
       const matchId = getCookie('matchId');
-      
-      console.log(matchId);
-    
-      if (!matchId) {
+
+      if (!matchId) {  // ✅ CORRECT: Check if matchId exists
         setError('No active match found');
         return;
       }
 
       // Fetch match and question data
-    const response = await apiClient.get(`/playground/playground/${matchId}`, // empty data
+      const response = await apiClient.get(`/playground/playground/${matchId}`, 
         { withCredentials: true } 
         );  
       if (response.data.success) {
         setMatch(response.data.match);
         setProblem(response.data.match.question);
+
+        console.log(response.data.match.question);
+        
         
         // Set initial code template
         if (codeTemplates[language as keyof typeof codeTemplates]) {
@@ -146,16 +267,16 @@ int main() {
     return null;
   };
 
-  const handleTimeUp = () => {
-    alert('Time is up! Your current solution will be submitted automatically.');
-    handleSubmit();
-  };
+  // const handleTimeUp = () => {
+  //   alert('Time is up! Your current solution will be submitted automatically.');
+  //   handleSubmit();
+  // };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
+  // const formatTime = (seconds: number) => {
+  //   const mins = Math.floor(seconds / 60);
+  //   const secs = seconds % 60;
+  //   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  // };
 
   const handleRunCode = async () => {
     if (!code.trim()) {
@@ -221,6 +342,14 @@ int main() {
     }
     
     return [];
+  };
+
+  const handleLeave = async () => {
+    if (match?.id) {
+      console.log('👉 Calling leaveMatch() with matchId:', match?.id);
+      leaveMatch(match.id); // Send PLAYER_LEFT message
+    }
+    navigate('/dashboard'); // Redirect to dashboard
   };
 
   const handleSubmit = async () => {
@@ -388,6 +517,14 @@ int main() {
           >
             {isSubmitting ? 'Submitting...' : 'Submit'}
           </motion.button>
+
+          <motion.button
+            onClick={handleLeave}
+            className="px-4 py-2 bg-red-500 hover:bg-red-700 text-white rounded transition-colors disabled:opacity-50"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+
+          >leaveMatch</motion.button>
         </div>
       </motion.div>
 
@@ -444,7 +581,7 @@ int main() {
                   </div>
                 )}
                 
-                {Array.isArray(problem.constraints) && (
+                {/* {Array.isArray(problem.constraints) && (
                   <div>
                     <h3 className="text-lg font-semibold text-white mb-2">Constraints:</h3>
                     <ul className="text-gray-300 text-sm space-y-1">
@@ -453,7 +590,7 @@ int main() {
                       ))}
                     </ul>
                   </div>
-                )}
+                )} */}
 
                 {problem.expected_time_complexity && (
                   <div>
@@ -475,6 +612,35 @@ int main() {
                       )}
                     </div>
                 </div>
+                {problem.test_cases && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-white mb-2">Test Cases:</h3>
+                    <div className="space-y-4">
+                      {(Array.isArray(problem.test_cases) ? problem.test_cases : [problem.test_cases]).map(
+                        (testCase: any, index: number) => (
+                          <div key={index} className="bg-gray-700 p-4 rounded-lg">
+                            <div className="font-mono text-sm text-gray-300 space-y-2">
+                              <div>
+                                <strong>Test Case {index + 1}:</strong>
+                              </div>
+                              <div>
+                                <strong>Input:</strong> {testCase.input}
+                              </div>
+                              <div>
+                                <strong>Expected Output:</strong> {testCase.expectedOutput}
+                              </div>
+                              {testCase.explanation && (
+                                <div>
+                                  <strong>Explanation:</strong> {testCase.explanation}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}         
               </>
             ) : (
               <div className="text-center text-gray-400">
@@ -493,21 +659,21 @@ int main() {
         >
           <div className="flex-1 border-b border-gray-700">
             <Editor
-              height="60%"
+              height="100%"
               language={language.toLowerCase()}
               value={code}
               onChange={value => setCode(value || '')}
               theme="vs-dark"
               options={{
                 fontSize: 14,
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
+                minimap: { enabled: true },
+                scrollBeyondLastLine: true,
                 automaticLayout: true,
                 padding: { top: 16 },
                 wordWrap: 'on',
                 lineNumbers: 'on',
                 folding: true,
-                matchBrackets: 'always'
+                matchBrackets: 'always',
               }}
             />
           </div>
@@ -631,6 +797,8 @@ int main() {
           </div>
         </motion.div>
       </div>
+      <WebSocketNotifications />
+      <WebSocketStatus />
     </motion.div>
   );
 };

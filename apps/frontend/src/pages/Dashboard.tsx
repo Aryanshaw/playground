@@ -3,15 +3,26 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Trophy, Target, Clock, LogOut, Play, Copy } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
+import { useWebSocketContext } from "../contexts/WebSocketContext";
 import ParticleBackground from "../components/ParticleBackground";
 import { getAuth, signOut as firebaseSignOut } from "firebase/auth";
-import apiClient from "../utils/axiosConfig"; 
+import apiClient from "../utils/axiosConfig";
+
+
+interface CreateMatchResponse {
+  success: boolean;
+  joiningCode: string;
+  message: string;
+  matchId?: string;
+}
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user, setUser } = useUser();
-  const [topic, SetTopic] = useState<string>("BINARY_SEARCH"); // Default value
-  const [difficulty, SetDifficulty] = useState<string>("EASY"); // Default value
+  const { createMatchAndShare, shareJoiningCode, joinMatch } = useWebSocketContext();
+  const [topic, SetTopic] = useState<string>("BINARY_SEARCH");
+  const [difficulty, SetDifficulty] = useState<string>("EASY");
+  const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [joiningCode, setJoiningCode] = useState<string>("");
   const [joinCode, setJoinCode] = useState<string>("");
   const [isCreating, setIsCreating] = useState(false);
@@ -56,42 +67,108 @@ const Dashboard: React.FC = () => {
   
   const difficulties = ["EASY", "MEDIUM", "HARD"];
 
-  // Create match code
+
+  // Match Service for backend API calls
+  const createMatchOnBackend = async (matchId: string): Promise<CreateMatchResponse> => {
+      try {
+        const response = await apiClient.post(`/playground-dashboard/match-with-your-buddy?action=create`, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include', // Include cookies
+          body: JSON.stringify({
+            matchId,
+            userId: user.id,
+            username: user.name,
+            topic: [topic],
+            Difficulty: [difficulty],
+            timestamp: Date.now()
+          })
+        });
+  
+        if (!response) {
+          throw new Error(`HTTP error! status: ${response}`);
+        }
+  
+        const result = await response.data;
+        console.log(result);
+        return result;
+        
+      } catch (error) {
+        console.error('Failed to create match:', error);
+        throw error;
+      }
+    };
+
+  // Create match using WebSocket approach
   const handleCreateCode = async () => {
     if (!topic || !difficulty) {
       alert("Please select both topic and difficulty");
       return;
     }
+
+    if (!user?.id) {
+      alert("User not authenticated");
+      return;
+    }
     
     setIsCreating(true);
+    
     try {
-      const response = await apiClient.post(
-        `/playground-dashboard/match-with-your-buddy?action=create`,
-        {
-          topic: [topic],
-          Difficulty: [difficulty],
-        },
-        { withCredentials: true } // Include cookies in the request
-      );
+      // Generate unique match ID
+      const matchId = `match_${Date.now()}_${user.id}`;
       
-      console.log("Response from backend:", response.data);
-      setJoiningCode(response.data.joiningCode);
-      alert(`Match created! Share this code: ${response.data.joiningCode}`);
-      navigate("/playground");
+      // First, join the match via WebSocket
+      joinMatch(matchId);
+      
+      // Then create the match on backend and get joining code
+      const result = await createMatchOnBackend(matchId);
+      
+      if (result.success && result.joiningCode) {
+        // Share the joining code via WebSocket - this will trigger notifications
+        shareJoiningCode(matchId, result.joiningCode);
+        
+        // Update local state
+        setCurrentMatchId(matchId);
+        setJoiningCode(result.joiningCode);
+        
+        console.log('Match created successfully:', {
+          matchId,
+          joiningCode: result.joiningCode,
+          message: result.message
+        });
+
+        // Optional: Navigate to playground after a short delay
+        setTimeout(() => {
+          navigate("/playground", { 
+            state: { 
+              matchId,
+              matchCode: result.joiningCode, 
+              isCreator: true,
+              topic,
+              difficulty 
+            } 
+          });
+        }, 2000); // Give time for WebSocket notifications
+        
+      } else {
+        throw new Error(result.message || 'Failed to create match');
+      }
+      
     } catch (error: any) {
-      console.error("Error creating match:", error.response?.data || error.message);
-      if (error.response?.status === 401) {
+      console.error("Error creating match:", error);
+      if (error.message?.includes('401') || error.message?.includes('Authentication')) {
         alert("Authentication failed. Please login again.");
         handleLogout();
       } else {
-        alert("Failed to create match. Please try again.");
+        alert(error.message || "Failed to create match. Please try again.");
       }
     } finally {
       setIsCreating(false);
     }
   };
 
-  // Join match with code
+  // Join match with code using WebSocket approach
   const handleJoinCode = async () => {
     if (!joinCode.trim()) {
       alert("Please enter a joining code");
@@ -103,29 +180,62 @@ const Dashboard: React.FC = () => {
       return;
     }
 
+    if (!user?.id) {
+      alert("User not authenticated");
+      return;
+    }
+
     setIsJoining(true);
+    
     try {
-      const response = await apiClient.post(
-        `/playground-dashboard/match-with-your-buddy?action=join&code=${joinCode}`,
-        {
+      // Generate match ID for joining (you might want to get this from backend)
+      const matchId = `join_${Date.now()}_${user.id}`;
+      
+      // Join match via WebSocket first
+      joinMatch(matchId);
+      
+      // Then join on backend
+      const response = await apiClient.post(`/playground-dashboard/match-with-your-buddy?action=join&code=${joinCode}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          matchId,
+          userId: user.id,
+          username: user.name,
           topic: [topic],
           Difficulty: [difficulty],
-        },
-        { withCredentials: true } // Include cookies in the request
-
-      );
-
-      console.log("Response from backend:", response.data);
-      alert("Successfully joined the match!");
-      // Navigate to game or handle success
-      navigate("/playground")
+          joiningCode: joinCode
+        })
+      });
+      
+      if (response) {
+        setCurrentMatchId(matchId);
+        alert("Successfully joined the match!");
+        
+        // Navigate to playground
+        navigate("/playground", { 
+          state: { 
+            matchId,
+            matchCode: joinCode, 
+            isCreator: false,
+            topic,
+            difficulty 
+          } 
+        });
+      } else {
+        throw new Error('Failed to join match');
+      }
+      
     } catch (error: any) {
-      console.error("Error joining match:", error.response?.data || error.message);
-      if (error.response?.status === 401) {
+      console.error("Error joining match:", error);
+      if (error.message?.includes('401') || error.message?.includes('Authentication')) {
         alert("Authentication failed. Please login again.");
         handleLogout();
       } else {
-        alert(error.response?.data?.message || "Failed to join match. Please try again.");
+        alert(error.message || "Failed to join match. Please try again.");
       }
     } finally {
       setIsJoining(false);
@@ -133,8 +243,10 @@ const Dashboard: React.FC = () => {
   };
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(joiningCode);
-    alert("Code copied to clipboard!");
+    if (joiningCode) {
+      navigator.clipboard.writeText(joiningCode);
+      alert("Code copied to clipboard!");
+    }
   };
 
   return (
@@ -284,27 +396,45 @@ const Dashboard: React.FC = () => {
         >
           <h2 className="text-xl font-bold mb-4 text-white">Private Match</h2>
           
+          {/* Current Match Status */}
+          {currentMatchId && (
+            <div className="mb-4 p-3 bg-blue-500/20 rounded-lg border border-blue-400/30">
+              <p className="text-blue-300 text-sm">
+                Current Match: <span className="font-mono">{currentMatchId}</span>
+              </p>
+            </div>
+          )}
+          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Create Match */}
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-cyan-400">Create Match</h3>
               <button
                 onClick={handleCreateCode}
-                disabled={isCreating}
-                className="w-full px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg text-white font-semibold hover:from-green-400 hover:to-emerald-400 transition-all duration-300 disabled:opacity-50"
+                disabled={isCreating || !user?.id}
+                className={`w-full px-4 py-2 rounded-lg font-semibold text-white transition-all duration-300 ${
+                  isCreating || !user?.id
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400'
+                }`}
               >
-                {isCreating ? "Creating..." : "Create Match Code"}
+                {isCreating ? "Creating Match..." : "Create Match Code"}
               </button>
               
               {joiningCode && (
-                <div className="flex items-center gap-2 p-3 bg-white/10 rounded-lg">
-                  <span className="text-white font-mono text-lg flex-1">{joiningCode}</span>
-                  <button
-                    onClick={copyToClipboard}
-                    className="p-2 text-cyan-400 hover:text-cyan-300 transition-colors"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 p-3 bg-white/10 rounded-lg">
+                    <span className="text-white font-mono text-lg flex-1">{joiningCode}</span>
+                    <button
+                      onClick={copyToClipboard}
+                      className="p-2 text-cyan-400 hover:text-cyan-300 transition-colors"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <p className="text-green-400 text-sm">
+                    ✅ Match created! WebSocket notifications sent.
+                  </p>
                 </div>
               )}
             </div>
@@ -321,8 +451,12 @@ const Dashboard: React.FC = () => {
               />
               <button
                 onClick={handleJoinCode}
-                disabled={isJoining}
-                className="w-full px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg text-white font-semibold hover:from-purple-400 hover:to-pink-400 transition-all duration-300 disabled:opacity-50"
+                disabled={isJoining || !user?.id}
+                className={`w-full px-4 py-2 rounded-lg font-semibold text-white transition-all duration-300 ${
+                  isJoining || !user?.id
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400'
+                }`}
               >
                 {isJoining ? "Joining..." : "Join Match"}
               </button>
@@ -423,16 +557,6 @@ const Dashboard: React.FC = () => {
         >
           <h2 className="text-xl font-bold mb-4 text-white">Quick Actions</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* <motion.button
-              onClick={() => navigate("/practice")}
-              className="flex items-center gap-3 p-4 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg text-white font-semibold hover:from-blue-400 hover:to-cyan-400 transition-all duration-300"
-              whileHover={{ scale: 1.02, y: -2 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Target className="w-5 h-5" />
-              Practice Mode
-            </motion.button> */}
-            
             <motion.button
               onClick={() => navigate("/leaderboard")}
               className="flex items-center gap-3 p-4 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-lg text-white font-semibold hover:from-yellow-400 hover:to-orange-400 transition-all duration-300"
@@ -442,16 +566,6 @@ const Dashboard: React.FC = () => {
               <Trophy className="w-5 h-5" />
               Leaderboard
             </motion.button>
-            
-            {/* <motion.button
-              onClick={() => navigate("/matchmaking")}
-              className="flex items-center gap-3 p-4 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg text-white font-semibold hover:from-purple-400 hover:to-pink-400 transition-all duration-300"
-              whileHover={{ scale: 1.02, y: -2 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Play className="w-5 h-5" />
-              Find Match
-            </motion.button> */}
           </div>
         </motion.div>
       </div>
