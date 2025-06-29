@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Trophy, Target, Clock, LogOut, Play, Copy } from "lucide-react";
@@ -8,18 +8,24 @@ import ParticleBackground from "../components/ParticleBackground";
 import { getAuth, signOut as firebaseSignOut } from "firebase/auth";
 import apiClient from "../utils/axiosConfig";
 
-
 interface CreateMatchResponse {
   success: boolean;
   joiningCode: string;
   message: string;
-  matchId?: string;
+  matchId: string;
+}
+
+interface JoinMatchResponse {
+  success: boolean;
+  message: string;
+  matchId: string;
+  matchDetails?: any;
 }
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user, setUser } = useUser();
-  const { createMatchAndShare, shareJoiningCode, joinMatch } = useWebSocketContext();
+  const { joinMatch, shareJoiningCode, lastMessage, isConnected } = useWebSocketContext();
   const [topic, SetTopic] = useState<string>("BINARY_SEARCH");
   const [difficulty, SetDifficulty] = useState<string>("EASY");
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
@@ -27,11 +33,42 @@ const Dashboard: React.FC = () => {
   const [joinCode, setJoinCode] = useState<string>("");
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [matchStatus, setMatchStatus] = useState<string>("");
 
-  if (!user) {
-    navigate("/auth");
-    return null;
-  }
+  useEffect(() => {
+    if (!user) {
+      navigate("/auth");
+    }
+  }, [user, navigate]);
+
+  // Listen for WebSocket messages
+  useEffect(() => {
+    if (lastMessage) {
+      switch (lastMessage.type) {
+        case 'MATCH_READY':
+          setMatchStatus("Match is ready! Both players connected.");
+          console.log('Match ready:', lastMessage.data);
+          break;
+        case 'WAITING_FOR_PLAYERS':
+          setMatchStatus("Waiting for another player to join...");
+          console.log('Waiting for players:', lastMessage.data);
+          break;
+        case 'CODE_SHARED':
+          console.log('Code shared in match:', lastMessage.data);
+          break;
+        case 'PLAYER_JOINED':
+          setMatchStatus("Player joined the match!");
+          navigate("/playground")
+          console.log('Player joined:', lastMessage.data);
+          break;
+        case 'ERROR':
+          console.error('WebSocket error:', lastMessage.data.message);
+          setMatchStatus(`Error: ${lastMessage.data.message}`);
+          break;
+      }
+    }
+    console.log(lastMessage?.data);
+  }, [lastMessage]);
 
   const handleLogout = async () => {
     try {
@@ -43,7 +80,9 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const winRate = Math.round((user.stats.wins / user.stats.totalMatches) * 100);
+  const winRate = user.stats.totalMatches > 0 
+    ? Math.round((user.stats.wins / user.stats.totalMatches) * 100) 
+    : 0;
 
   const topics = [
     "BINARY_SEARCH",
@@ -67,40 +106,134 @@ const Dashboard: React.FC = () => {
   
   const difficulties = ["EASY", "MEDIUM", "HARD"];
 
+  // Create match on backend and get joining code
+  const createMatchOnBackend = async (): Promise<CreateMatchResponse> => {
+    try {
+      const response = await apiClient.post('/playground-dashboard/match-with-your-buddy?action=create', {
+        userId: user.id,
+        username: user.name,
+        topic: [topic],
+        Difficulty: [difficulty],
+        timestamp: Date.now()
+      });
 
-  // Match Service for backend API calls
-  const createMatchOnBackend = async (matchId: string): Promise<CreateMatchResponse> => {
-      try {
-        const response = await apiClient.post(`/playground-dashboard/match-with-your-buddy?action=create`, {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include', // Include cookies
-          body: JSON.stringify({
-            matchId,
-            userId: user.id,
-            username: user.name,
-            topic: [topic],
-            Difficulty: [difficulty],
-            timestamp: Date.now()
-          })
-        });
-  
-        if (!response) {
-          throw new Error(`HTTP error! status: ${response}`);
-        }
-  
-        const result = await response.data;
-        console.log(result);
-        return result;
-        
-      } catch (error) {
-        console.error('Failed to create match:', error);
-        throw error;
+      console.log('Backend response:', response.data);
+      console.log('Response structure:', {
+        success: response.data.success,
+        joiningCode: response.data.joiningCode,
+        matchId: response.data.matchId,
+        message: response.data.message,
+        allKeys: Object.keys(response.data)
+      });
+      
+      // Handle different possible response formats
+      const responseData = response.data;
+      
+      // Sometimes the server might return success as a string or different format
+      const isSuccess = responseData.success === true || responseData.success === 'true' || 
+                       responseData.status === 'success' || response.status === 200;
+      
+      if (!isSuccess && responseData.success === false) {
+        throw new Error(responseData.message || 'Failed to create match');
       }
-    };
+      
+      // Try different possible field names that the server might use
+      const matchId = responseData.matchId || responseData.match_id || responseData.id || responseData.gameId;
+      const joiningCode = responseData.joiningCode || responseData.joining_code || responseData.code || responseData.gameCode;
+      
+      // Create a normalized response
+      const normalizedResponse: CreateMatchResponse = {
+        success: true,
+        matchId: matchId,
+        joiningCode: joiningCode,
+        message: responseData.message || 'Match created successfully'
+      };
+      
+      console.log('Normalized response:', normalizedResponse);
+      
+      return normalizedResponse;
+      
+    } catch (error: any) {
+      console.error('Failed to create match on backend:', error);
+      
+      // Handle specific error cases
+      if (error.response?.status === 401) {
+        throw new Error('Authentication failed. Please login again.');
+      } else if (error.response?.status === 400) {
+        throw new Error(error.response.data?.message || 'Invalid request data');
+      } else if (error.response?.status >= 500) {
+        throw new Error('Server error. Please try again later.');
+      }
+      
+      throw new Error(error.response?.data?.message || 'Failed to create match on backend');
+    }
+  };
 
-  // Create match using WebSocket approach
+  // Join match on backend with joining code
+  const joinMatchOnBackend = async (code: string): Promise<JoinMatchResponse> => {
+    try {
+      const response = await apiClient.post(`/playground-dashboard/match-with-your-buddy?action=join&code=${code}`, {
+        userId: user.id,
+        username: user.name,
+        topic: [topic],
+        Difficulty: [difficulty],
+        // Remove joiningCode from request body since it's already in URL
+        timestamp: Date.now()
+      });
+
+      console.log('Join match response:', response.data);
+      console.log('Join response structure:', {
+        success: response.data.success,
+        matchId: response.data.matchId,
+        message: response.data.message,
+        allKeys: Object.keys(response.data)
+      });
+      
+      // Handle different possible response formats
+      const responseData = response.data;
+      
+      // Sometimes the server might return success as a string or different format
+      const isSuccess = responseData.success === true || responseData.success === 'true' || 
+                       responseData.status === 'success' || response.status === 200;
+      
+      if (!isSuccess && responseData.success === false) {
+        throw new Error(responseData.message || 'Failed to join match');
+      }
+      
+      // Try different possible field names that the server might use
+      const matchId = responseData.matchId || responseData.match_id || responseData.id || responseData.gameId;
+      
+      // Create a normalized response
+      const normalizedResponse: JoinMatchResponse = {
+        success: true,
+        matchId: matchId,
+        message: responseData.message || 'Successfully joined match',
+        matchDetails: responseData.matchDetails || responseData.details
+      };
+      
+      console.log('Normalized join response:', normalizedResponse);
+      
+      return normalizedResponse;
+      
+    } catch (error: any) {
+      console.error('Failed to join match on backend:', error);
+      
+      // Handle specific error cases
+      if (error.response?.status === 401) {
+        throw new Error('Authentication failed. Please login again.');
+      } else if (error.response?.status === 400) {
+        throw new Error(error.response.data?.message || 'Invalid joining code or match not found');
+      } else if (error.response?.status === 404) {
+        throw new Error('Match not found. Please check the joining code.');
+      } else if (error.response?.status >= 500) {
+        throw new Error('Server error. Please try again later.');
+      }
+      
+      throw new Error(error.response?.data?.message || 'Failed to join match on backend');
+    }
+  };
+
+  // Create a new match
   const handleCreateCode = async () => {
     if (!topic || !difficulty) {
       alert("Please select both topic and difficulty");
@@ -111,53 +244,61 @@ const Dashboard: React.FC = () => {
       alert("User not authenticated");
       return;
     }
+
+    if (!isConnected) {
+      alert("WebSocket not connected. Please wait and try again.");
+      return;
+    }
     
     setIsCreating(true);
+    setMatchStatus("Creating match...");
     
     try {
-      // Generate unique match ID
-      const matchId = `match_${Date.now()}_${user.id}`;
+      // Step 1: Create match on backend and get matchId + joiningCode
+      const result = await createMatchOnBackend();
       
-      // First, join the match via WebSocket
-      joinMatch(matchId);
+      console.log('Create match result:', result);
       
-      // Then create the match on backend and get joining code
-      const result = await createMatchOnBackend(matchId);
-      
-      if (result.success && result.joiningCode) {
-        // Share the joining code via WebSocket - this will trigger notifications
-        shareJoiningCode(matchId, result.joiningCode);
-        
-        // Update local state
-        setCurrentMatchId(matchId);
-        setJoiningCode(result.joiningCode);
-        
-        console.log('Match created successfully:', {
-          matchId,
-          joiningCode: result.joiningCode,
-          message: result.message
-        });
-
-        // Optional: Navigate to playground after a short delay
-        setTimeout(() => {
-          navigate("/playground", { 
-            state: { 
-              matchId,
-              matchCode: result.joiningCode, 
-              isCreator: true,
-              topic,
-              difficulty 
-            } 
-          });
-        }, 2000); // Give time for WebSocket notifications
-        
-      } else {
-        throw new Error(result.message || 'Failed to create match');
+      // Validate the response more carefully
+      if (!result.joiningCode && !result.matchId) {
+        console.error('Server response missing both joiningCode and matchId:', result);
+        throw new Error('Server did not return match details. Please try again.');
       }
       
+      if (!result.joiningCode) {
+        console.error('Server response missing joiningCode:', result);
+        throw new Error('Server did not return joining code. Please try again.');
+      }
+      
+      if (!result.matchId) {
+        console.error('Server response missing matchId:', result);
+        throw new Error('Server did not return match ID. Please try again.');
+      }
+
+      // Step 2: Join the WebSocket room using the matchId from backend
+      console.log(`Joining WebSocket match: ${result.matchId}`);
+      joinMatch(result.matchId);
+      
+      // Step 3: Share the joining code via WebSocket (so other players can see it)
+      setTimeout(() => {
+        shareJoiningCode(result.matchId, result.joiningCode);
+      }, 500); // Small delay to ensure join is processed first
+      
+      // Step 4: Update local state
+      setCurrentMatchId(result.matchId);
+      setJoiningCode(result.joiningCode);
+      setMatchStatus("Match created! Waiting for another player...");
+      
+      console.log('Match created successfully:', {
+        matchId: result.matchId,
+        joiningCode: result.joiningCode
+      });
+
     } catch (error: any) {
       console.error("Error creating match:", error);
-      if (error.message?.includes('401') || error.message?.includes('Authentication')) {
+      setMatchStatus("Failed to create match");
+      
+      if (error.message?.includes('Authentication')) {
         alert("Authentication failed. Please login again.");
         handleLogout();
       } else {
@@ -168,7 +309,7 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // Join match with code using WebSocket approach
+  // Join an existing match with code
   const handleJoinCode = async () => {
     if (!joinCode.trim()) {
       alert("Please enter a joining code");
@@ -185,53 +326,56 @@ const Dashboard: React.FC = () => {
       return;
     }
 
+    if (!isConnected) {
+      alert("WebSocket not connected. Please wait and try again.");
+      return;
+    }
+
     setIsJoining(true);
+    setMatchStatus("Joining match...");
     
     try {
-      // Generate match ID for joining (you might want to get this from backend)
-      const matchId = `join_${Date.now()}_${user.id}`;
+      // Step 1: Join match on backend with the joining code
+      const result = await joinMatchOnBackend(joinCode.trim().toUpperCase());
       
-      // Join match via WebSocket first
-      joinMatch(matchId);
+      console.log('Join match result:', result);
       
-      // Then join on backend
-      const response = await apiClient.post(`/playground-dashboard/match-with-your-buddy?action=join&code=${joinCode}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          matchId,
-          userId: user.id,
-          username: user.name,
-          topic: [topic],
-          Difficulty: [difficulty],
-          joiningCode: joinCode
-        })
+      if (!result.matchId) {
+        console.error('Server response missing matchId:', result);
+        throw new Error('Server did not return match ID. Please try again.');
+      }
+
+      // Step 2: Join the WebSocket room using the matchId from backend
+      console.log(`Joining WebSocket match: ${result.matchId}`);
+      joinMatch(result.matchId);
+      
+      // Step 3: Update local state
+      setCurrentMatchId(result.matchId);
+      setMatchStatus("Successfully joined match!");
+      
+      console.log('Successfully joined match:', {
+        matchId: result.matchId,
+        joiningCode: joinCode
       });
-      
-      if (response) {
-        setCurrentMatchId(matchId);
-        alert("Successfully joined the match!");
-        
-        // Navigate to playground
+
+      // Step 4: Navigate to playground (can be immediate since we're joining existing match)
+      setTimeout(() => {
         navigate("/playground", { 
           state: { 
-            matchId,
-            matchCode: joinCode, 
+            matchId: result.matchId,
+            matchCode: joinCode.trim().toUpperCase(), 
             isCreator: false,
             topic,
             difficulty 
           } 
         });
-      } else {
-        throw new Error('Failed to join match');
-      }
+      }, 1000);
       
     } catch (error: any) {
       console.error("Error joining match:", error);
-      if (error.message?.includes('401') || error.message?.includes('Authentication')) {
+      setMatchStatus("Failed to join match");
+      
+      if (error.message?.includes('Authentication')) {
         alert("Authentication failed. Please login again.");
         handleLogout();
       } else {
@@ -242,334 +386,261 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const copyToClipboard = () => {
+  // Navigate to playground when match is ready
+  const handleEnterPlayground = () => {
+    if (currentMatchId && joiningCode) {
+      navigate("/playground", { 
+        state: { 
+          matchId: currentMatchId,
+          matchCode: joiningCode, 
+          isCreator: true,
+          topic,
+          difficulty 
+        } 
+      });
+    }
+  };
+
+  const copyToClipboard = async () => {
     if (joiningCode) {
-      navigator.clipboard.writeText(joiningCode);
-      alert("Code copied to clipboard!");
+      try {
+        await navigator.clipboard.writeText(joiningCode);
+        alert("Code copied to clipboard!");
+      } catch (error) {
+        // Fallback for browsers that don't support clipboard API
+        const textArea = document.createElement('textarea');
+        textArea.value = joiningCode;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        alert("Code copied to clipboard!");
+      }
     }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="min-h-screen relative"
-    >
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
       <ParticleBackground />
-
-      <div className="container mx-auto px-4 py-8 relative z-10">
-        {/* Header */}
+      
+      {/* Header */}
+      <div className="relative z-10 flex justify-between items-center p-6">
         <motion.div
-          className="flex justify-between items-center mb-8"
-          initial={{ y: -50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.2 }}
+          initial={{ opacity: 0, x: -50 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="flex items-center space-x-4"
         >
-          <div className="flex items-center gap-4">
-            <motion.img
-              src={user.avatar}
-              alt={user.name}
-              className="w-16 h-16 rounded-full border-2 border-cyan-400"
-              whileHover={{ scale: 1.1, rotate: 360 }}
-              transition={{ duration: 0.5 }}
-            />
-            <div>
-              <h1 className="text-2xl font-bold text-white">{user.name}</h1>
-              <p className="text-cyan-400">Rank #{user.stats.rank}</p>
-            </div>
+          <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
+            {user.name?.charAt(0).toUpperCase()}
           </div>
-
-          <motion.button
-            onClick={handleLogout}
-            className="flex items-center gap-2 px-4 py-2 text-red-400 hover:text-red-300 transition-colors"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <LogOut className="w-4 h-4" />
-            Logout
-          </motion.button>
+          <div>
+            <h2 className="text-xl font-bold text-white">{user.name}</h2>
+            <p className="text-gray-300 text-sm">Ready to code!</p>
+          </div>
         </motion.div>
 
-        {/* Stats Grid */}
-        <motion.div
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8"
-          initial={{ y: 50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.4 }}
+        <motion.button
+          initial={{ opacity: 0, x: 50 }}
+          animate={{ opacity: 1, x: 0 }}
+          onClick={handleLogout}
+          className="flex items-center space-x-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
         >
-          {[
-            {
-              icon: Target,
-              label: "Total Matches",
-              value: user.stats.totalMatches,
-              color: "from-blue-500 to-cyan-500",
-            },
-            {
-              icon: Trophy,
-              label: "Win Rate",
-              value: `${winRate}%`,
-              color: "from-green-500 to-emerald-500",
-            },
-            {
-              icon: Clock,
-              label: "Best Time",
-              value: `${user.stats.bestTime}s`,
-              color: "from-orange-500 to-red-500",
-            },
-          ].map((stat, index) => (
-            <motion.div
-              key={index}
-              className="glass-effect rounded-xl p-6 tilt-effect hover:bg-white/20 transition-all duration-300"
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.6 + index * 0.1 }}
-              whileHover={{ y: -5 }}
-            >
-              <div
-                className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-lg flex items-center justify-center mb-4`}
-              >
-                <stat.icon className="w-6 h-6 text-white" />
-              </div>
-              <h3 className="text-2xl font-bold text-white mb-1">
-                {stat.value}
-              </h3>
-              <p className="text-gray-300 text-sm">{stat.label}</p>
-            </motion.div>
-          ))}
+          <LogOut size={20} />
+          <span>Logout</span>
+        </motion.button>
+      </div>
 
-          {/* Match Configuration */}
+      {/* Main Content */}
+      <div className="relative z-10 max-w-6xl mx-auto px-6 py-8">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <motion.div
-            className="glass-effect rounded-xl p-6 tilt-effect hover:bg-white/20 transition-all duration-300"
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.9 }}
-            whileHover={{ y: -5 }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20"
           >
-            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center mb-4">
-              <span className="text-white text-xl font-bold">👨‍💻</span>
-            </div>
-            <h3 className="text-xl font-bold text-white mb-3">Match Setup</h3>
-
-            <div className="space-y-3">
-              <select
-                className="w-full p-2 bg-white/10 text-white rounded-lg border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                value={topic}
-                onChange={(e) => SetTopic(e.target.value)}
-              >
-                {topics.map((topicOption) => (
-                  <option
-                    className="bg-gray-800 text-white"
-                    key={topicOption}
-                    value={topicOption}
-                  >
-                    {topicOption.replace(/_/g, ' ')}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                className="w-full p-2 bg-white/10 text-white rounded-lg border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                value={difficulty}
-                onChange={(e) => SetDifficulty(e.target.value)}
-              >
-                {difficulties.map((difficultyOption) => (
-                  <option
-                    className="bg-gray-800 text-white"
-                    key={difficultyOption}
-                    value={difficultyOption}
-                  >
-                    {difficultyOption}
-                  </option>
-                ))}
-              </select>
+            <div className="flex items-center space-x-3">
+              <Trophy className="text-yellow-400" size={24} />
+              <div>
+                <p className="text-gray-300">Win Rate</p>
+                <p className="text-2xl font-bold text-white">{winRate}%</p>
+              </div>
             </div>
           </motion.div>
-        </motion.div>
 
-        {/* Create/Join Match Section */}
-        <motion.div
-          className="glass-effect rounded-xl p-6 mb-8"
-          initial={{ y: 50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.8 }}
-        >
-          <h2 className="text-xl font-bold mb-4 text-white">Private Match</h2>
-          
-          {/* Current Match Status */}
-          {currentMatchId && (
-            <div className="mb-4 p-3 bg-blue-500/20 rounded-lg border border-blue-400/30">
-              <p className="text-blue-300 text-sm">
-                Current Match: <span className="font-mono">{currentMatchId}</span>
-              </p>
-            </div>
-          )}
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Create Match */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-cyan-400">Create Match</h3>
-              <button
-                onClick={handleCreateCode}
-                disabled={isCreating || !user?.id}
-                className={`w-full px-4 py-2 rounded-lg font-semibold text-white transition-all duration-300 ${
-                  isCreating || !user?.id
-                    ? 'bg-gray-400 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400'
-                }`}
-              >
-                {isCreating ? "Creating Match..." : "Create Match Code"}
-              </button>
-              
-              {joiningCode && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 p-3 bg-white/10 rounded-lg">
-                    <span className="text-white font-mono text-lg flex-1">{joiningCode}</span>
-                    <button
-                      onClick={copyToClipboard}
-                      className="p-2 text-cyan-400 hover:text-cyan-300 transition-colors"
-                    >
-                      <Copy className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <p className="text-green-400 text-sm">
-                    ✅ Match created! WebSocket notifications sent.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Join Match */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-purple-400">Join Match</h3>
-              <input
-                type="text"
-                placeholder="Enter joining code"
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                className="w-full p-2 bg-white/10 text-white rounded-lg border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-400"
-              />
-              <button
-                onClick={handleJoinCode}
-                disabled={isJoining || !user?.id}
-                className={`w-full px-4 py-2 rounded-lg font-semibold text-white transition-all duration-300 ${
-                  isJoining || !user?.id
-                    ? 'bg-gray-400 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400'
-                }`}
-              >
-                {isJoining ? "Joining..." : "Join Match"}
-              </button>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Rank Progress */}
-        <motion.div
-          className="glass-effect rounded-xl p-6 mb-8"
-          initial={{ y: 50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 1.0 }}
-        >
-          <h2 className="text-xl font-bold mb-4 text-white">Rank Progress</h2>
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <div className="flex justify-between text-sm text-gray-300 mb-2">
-                <span>Current Rank: #{user.stats.rank}</span>
-                <span>Next: #{user.stats.rank - 1}</span>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20"
+          >
+            <div className="flex items-center space-x-3">
+              <Target className="text-green-400" size={24} />
+              <div>
+                <p className="text-gray-300">Total Matches</p>
+                <p className="text-2xl font-bold text-white">{user.stats.totalMatches}</p>
               </div>
             </div>
-          </div>
-        </motion.div>
+          </motion.div>
 
-        {/* Recent Matches */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20"
+          >
+            <div className="flex items-center space-x-3">
+              <Clock className="text-blue-400" size={24} />
+              <div>
+                <p className="text-gray-300">Avg Time</p>
+                <p className="text-2xl font-bold text-white">{user.stats.averageTime}s</p>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* Match Configuration */}
         <motion.div
-          className="glass-effect rounded-xl p-6 mb-8"
-          initial={{ y: 50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 1.2 }}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 mb-8"
         >
-          <h2 className="text-xl font-bold mb-4 text-white">Recent Matches</h2>
-          <div className="space-y-3">
-            {[
-              {
-                opponent: "Alex Chen",
-                result: "WIN",
-                time: "2m 45s",
-                xp: "+25",
-              },
-              {
-                opponent: "Sarah Kim",
-                result: "LOSS",
-                time: "4m 12s",
-                xp: "-10",
-              },
-              {
-                opponent: "Mike Johnson",
-                result: "WIN",
-                time: "1m 58s",
-                xp: "+30",
-              },
-            ].map((match, index) => (
-              <motion.div
-                key={index}
-                className="flex items-center justify-between p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-all duration-300"
-                initial={{ x: -50, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: 1.4 + index * 0.1 }}
-                whileHover={{ x: 5 }}
+          <h3 className="text-xl font-bold text-white mb-6">Configure Match</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-gray-300 mb-2">Topic</label>
+              <select
+                value={topic}
+                onChange={(e) => SetTopic(e.target.value)}
+                className="w-full p-3 bg-white/5 border border-white/20 rounded-lg text-white focus:outline-none focus:border-purple-500"
               >
-                <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${
-                    match.result === 'WIN' ? 'bg-green-400' : 'bg-red-400'
-                  }`}></div>
-                  <div>
-                    <p className="text-white font-medium">vs {match.opponent}</p>
-                    <p className="text-gray-400 text-sm">{match.topic}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className={`font-semibold ${
-                    match.result === 'WIN' ? 'text-green-400' : 'text-red-400'
-                  }`}>
-                    {match.result}
-                  </p>
-                  <p className="text-gray-400 text-sm">{match.time}</p>
-                </div>
-                <div className={`px-2 py-1 rounded text-sm font-medium ${
-                  match.result === 'WIN' 
-                    ? 'bg-green-400/20 text-green-400' 
-                    : 'bg-red-400/20 text-red-400'
-                }`}>
-                  {match.xp}
-                </div>
-              </motion.div>
-            ))}
+                {topics.map((t) => (
+                  <option key={t} value={t} className="bg-gray-800">
+                    {t.replace(/_/g, ' ')}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-gray-300 mb-2">Difficulty</label>
+              <select
+                value={difficulty}
+                onChange={(e) => SetDifficulty(e.target.value)}
+                className="w-full p-3 bg-white/5 border border-white/20 rounded-lg text-white focus:outline-none focus:border-purple-500"
+              >
+                {difficulties.map((d) => (
+                  <option key={d} value={d} className="bg-gray-800">
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </motion.div>
 
-        {/* Quick Actions */}
-        <motion.div
-          className="glass-effect rounded-xl p-6"
-          initial={{ y: 50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 1.4 }}
-        >
-          <h2 className="text-xl font-bold mb-4 text-white">Quick Actions</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* WebSocket Status */}
+        {matchStatus && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-blue-500/20 backdrop-blur-sm rounded-lg p-4 border border-blue-500/30 mb-6"
+          >
+            <p className="text-blue-200 text-center">{matchStatus}</p>
+            <div className="text-center mt-2">
+              <span className={`inline-block w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}></span>
+              <span className="text-gray-300 ml-2 text-sm">
+                WebSocket {isConnected ? 'Connected' : 'Disconnected'}
+              </span>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Match Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Create Match */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20"
+          >
+            <h3 className="text-xl font-bold text-white mb-4">Create Match</h3>
+            
             <motion.button
-              onClick={() => navigate("/leaderboard")}
-              className="flex items-center gap-3 p-4 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-lg text-white font-semibold hover:from-yellow-400 hover:to-orange-400 transition-all duration-300"
-              whileHover={{ scale: 1.02, y: -2 }}
+              onClick={handleCreateCode}
+              disabled={isCreating || !isConnected}
+              className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2"
+              whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              <Trophy className="w-5 h-5" />
-              Leaderboard
+              <Play size={20} />
+              <span>{isCreating ? 'Creating...' : 'Create Match'}</span>
             </motion.button>
-          </div>
-        </motion.div>
+
+            {joiningCode && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 p-4 bg-green-500/20 rounded-lg border border-green-500/30"
+              >
+                <p className="text-green-200 text-sm mb-2">Your joining code:</p>
+                <div className="flex items-center space-x-2">
+                  <code className="flex-1 bg-black/30 px-3 py-2 rounded text-green-300 font-mono">
+                    {joiningCode}
+                  </code>
+                  <button
+                    onClick={copyToClipboard}
+                    className="bg-green-600 hover:bg-green-700 p-2 rounded transition-colors"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </div>
+                {lastMessage?.type === 'MATCH_READY' && (
+                  <button
+                    onClick={handleEnterPlayground}
+                    className="w-full mt-3 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors"
+                  >
+                    Enter Playground
+                  </button>
+                )}
+              </motion.div>
+            )}
+          </motion.div>
+
+          {/* Join Match */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20"
+          >
+            <h3 className="text-xl font-bold text-white mb-4">Join Match</h3>
+            
+            <input
+              type="text"
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              placeholder="Enter joining code"
+              className="w-full p-3 bg-white/5 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 mb-4"
+            />
+
+            <motion.button
+              onClick={handleJoinCode}
+              disabled={isJoining || !joinCode.trim() || !isConnected}
+              className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Target size={20} />
+              <span>{isJoining ? 'Joining...' : 'Join Match'}</span>
+            </motion.button>
+          </motion.div>
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 };
 

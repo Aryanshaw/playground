@@ -9,30 +9,30 @@ const Matching: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useUser();
   const [matchCode, setMatchCode] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [opponent, setOpponent] = useState<any>(null);
+  // const [isSearching, setIsSearching] = useState(false);
+  // const [opponent, setOpponent] = useState<any>(null);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    // Generate random match code
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    setMatchCode(code);
-  }, []);
+  // useEffect(() => {
+  //   // Generate random match code
+  //   const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+  //   setMatchCode(code);
+  // }, []);
 
-  const handleFindMatch = () => {
-    setIsSearching(true);
+  // const handleFindMatch = () => {
+  //   setIsSearching(true);
     
-    // Simulate finding an opponent
-    setTimeout(() => {
-      setOpponent({
-        name: 'Alex Chen',
-        avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=alex',
-        rank: 1180,
-        winRate: 73
-      });
-      setIsSearching(false);
-    }, 3000);
-  };
+  //   // Simulate finding an opponent
+  //   setTimeout(() => {
+  //     setOpponent({
+  //       name: 'Alex Chen',
+  //       avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=alex',
+  //       rank: 1180,
+  //       winRate: 73
+  //     });
+  //     setIsSearching(false);
+  //   }, 3000);
+  // };
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(matchCode);
@@ -113,7 +113,7 @@ const Matching: React.FC = () => {
 
                   <div className="text-gray-300">OR</div>
 
-                  <motion.button
+                  {/* <motion.button
                     onClick={handleFindMatch}
                     className="w-full px-8 py-4 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl text-xl font-bold hover:from-purple-400 hover:to-pink-400 transition-all duration-300 flex items-center justify-center gap-3"
                     whileHover={{ scale: 1.02 }}
@@ -121,7 +121,7 @@ const Matching: React.FC = () => {
                   >
                     <Users className="w-6 h-6" />
                     Find Random Opponent
-                  </motion.button>
+                  </motion.button> */}
                 </motion.div>
               )}
 

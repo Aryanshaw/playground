@@ -14,8 +14,8 @@ LeavePlaygroundRoute.post("/logout-account",Middleware, async(req,res) => {
 
         if(UserExist){UserExist.isverified == false};
 
-        console.log(`${UserExist?.username} logged out!`);
-        res.status(201).json({message : `${UserExist?.username} logged out!`})
+        console.log(`${UserExist?.name} logged out!`);
+        res.status(201).json({message : `${UserExist?.name} logged out!`})
         return;
 
     }catch (error : any) {
@@ -36,8 +36,8 @@ LeavePlaygroundRoute.delete("/delete-account",Middleware, async(req,res) => {
         });
 
         if(DeleteAccount){
-            console.log(`${DeleteAccount.username}'s account has been deactivated.`);
-            res.status(201).json({message:`${DeleteAccount.username}'s account has been deactivated.`});
+            console.log(`${DeleteAccount.name}'s account has been deactivated.`);
+            res.status(201).json({message:`${DeleteAccount.name}'s account has been deactivated.`});
             return;
         }else{
             console.log(`Error in deactivating the account.`);

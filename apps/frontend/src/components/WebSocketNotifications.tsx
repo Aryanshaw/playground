@@ -1,15 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Users,
-  UserMinus,
-  Code,
-  Trophy,
-  AlertCircle,
-  X,
-  Copy,
-  Share2
-} from 'lucide-react';
+import { Users, UserMinus, Trophy, AlertCircle, X, Copy, Share2 } from 'lucide-react';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
 import { useUser } from '../contexts/UserContext';
 

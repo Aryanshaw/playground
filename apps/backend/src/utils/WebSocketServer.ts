@@ -6,6 +6,8 @@ type MessageType =
   | 'PLAYER_LEFT'
   | 'CODE_SHARED'
   | 'MATCH_COMPLETED'
+  | 'MATCH_READY'
+  | 'WAITING_FOR_PLAYERS'
   | 'ERROR';
 
 interface WSMessage {
@@ -13,7 +15,7 @@ interface WSMessage {
   data: any;
   matchId?: string;
   timestamp?: number;
-  userId?: string; // Add userId to track message sender
+  userId?: string;
 }
 
 interface WinnerData {
@@ -65,7 +67,6 @@ class WebSocketServer {
     ws.on('message', (data: RawData) => {
       try {
         const message: WSMessage = JSON.parse(data.toString());
-        // Ensure userId is set in the message
         message.userId = userId;
         this.handleMessage(userId, message);
       } catch (error) {
@@ -111,41 +112,99 @@ class WebSocketServer {
 
   private handlePlayerJoined(userId: string, matchId: string, data: any): void {
     if (!this.matches.has(matchId)) {
-      // Initialize the match with an empty map and store the joining code
-      this.matches.set(matchId, { players: new Map(), joiningCode: data.joiningCode });
+      // Initialize the match with an empty map
+      this.matches.set(matchId, { players: new Map() });
     }
   
-    this.matches.get(matchId)!.players.set(userId, { username: data.username });
+    const match = this.matches.get(matchId)!;
+    match.players.set(userId, { username: data.username });
     
-    // Broadcast to all players EXCEPT the one who joined
-    this.broadcastToMatch(matchId, {
-      type: 'PLAYER_JOINED',
-      data: {
-        playerId: userId,
-        username: data.username,
-        matchId,
-        totalPlayers: this.matches.get(matchId)!.players.size
-      },
-      timestamp: Date.now(),
-      userId // Include the sender's userId
-    }, userId); // Exclude the sender
+    const totalPlayers = match.players.size;
+    
+    // Only notify about successful connection if there are 2 or more players
+    if (totalPlayers >= 2) {
+      // Broadcast to all players that match is ready
+      this.broadcastToMatch(matchId, {
+        type: 'MATCH_READY',
+        data: {
+          matchId,
+          totalPlayers,
+          message: 'Match is ready! Both players connected.'
+        },
+        timestamp: Date.now(),
+        userId
+      });
+      
+      // Also send individual player joined notifications to others
+      this.broadcastToMatch(matchId, {
+        type: 'PLAYER_JOINED',
+        data: {
+          playerId: userId,
+          username: data.username,
+          matchId,
+          totalPlayers
+        },
+        timestamp: Date.now(),
+        userId
+      }, userId); // Exclude the sender
+    } else {
+      // Send waiting message to the lone player
+      this.sendToClient(userId, {
+        type: 'WAITING_FOR_PLAYERS',
+        data: {
+          matchId,
+          totalPlayers,
+          message: 'Waiting for another player to join...'
+        },
+        timestamp: Date.now(),
+        userId
+      });
+    }
   }
 
   private handlePlayerLeft(userId: string, matchId: string, data: any): void {
     const match = this.matches.get(matchId);
     if (!match) return;
 
+    const username = match.players.get(userId)?.username || data.username || 'Unknown';
     match.players.delete(userId);
 
     if (match.players.size === 0) {
       this.matches.delete(matchId);
+      console.log(`Match ${matchId} deleted - no players remaining`);
+    } else if (match.players.size === 1) {
+      // Only one player left, notify them they're waiting
+      const remainingPlayerId = Array.from(match.players.keys())[0];
+      this.sendToClient(remainingPlayerId, {
+        type: 'WAITING_FOR_PLAYERS',
+        data: {
+          matchId,
+          totalPlayers: 1,
+          message: 'Other player left. Waiting for a new player to join...'
+        },
+        timestamp: Date.now(),
+        userId
+      });
+      
+      // Also send player left notification
+      this.sendToClient(remainingPlayerId, {
+        type: 'PLAYER_LEFT',
+        data: {
+          playerId: userId,
+          username,
+          matchId,
+          remainingPlayers: match.players.size
+        },
+        timestamp: Date.now(),
+        userId
+      });
     } else {
-      // Broadcast to remaining players
+      // Multiple players remaining, broadcast to all
       this.broadcastToMatch(matchId, {
         type: 'PLAYER_LEFT',
         data: {
           playerId: userId,
-          username: data.username,
+          username,
           matchId,
           remainingPlayers: match.players.size
         },
@@ -167,19 +226,36 @@ class WebSocketServer {
     
     console.log(`Storing joining code for match ${matchId}:`, data.joiningCode);
     
-    // Broadcast to ALL players including the creator
-    // This is important for the joining code notification
-    this.broadcastToMatch(matchId, {
-      type: 'CODE_SHARED',
-      data: {
-        playerId: userId,
-        username: data.username,
-        joiningCode: data.joiningCode,
-        matchId
-      },
-      timestamp: Date.now(),
-      userId
-    }, null); // Don't exclude anyone for joining code sharing
+    // Only broadcast if there are at least 2 players
+    if (match.players.size >= 2) {
+      this.broadcastToMatch(matchId, {
+        type: 'CODE_SHARED',
+        data: {
+          playerId: userId,
+          username: data.username,
+          joiningCode: data.joiningCode,
+          matchId,
+          sharedBy: data.username
+        },
+        timestamp: Date.now(),
+        userId
+      });
+      
+      console.log(`📤 Code shared with ${match.players.size} players in match ${matchId}`);
+    } else {
+      // Send a message to the lone player that code sharing requires another player
+      this.sendToClient(userId, {
+        type: 'ERROR',
+        data: { 
+          message: 'Cannot share code - waiting for another player to join the match.',
+          code: 'INSUFFICIENT_PLAYERS'
+        },
+        timestamp: Date.now(),
+        userId
+      });
+      
+      console.log(`⚠️ Code sharing attempted but only ${match.players.size} player(s) in match ${matchId}`);
+    }
   }
 
   private handleDisconnection(userId: string): void {
@@ -192,7 +268,35 @@ class WebSocketServer {
 
         if (match.players.size === 0) {
           this.matches.delete(matchId);
+          console.log(`Match ${matchId} deleted - no players remaining`);
+        } else if (match.players.size === 1) {
+          // Notify the remaining player they're now waiting
+          const remainingPlayerId = Array.from(match.players.keys())[0];
+          this.sendToClient(remainingPlayerId, {
+            type: 'WAITING_FOR_PLAYERS',
+            data: {
+              matchId,
+              totalPlayers: 1,
+              message: 'Other player disconnected. Waiting for a new player to join...'
+            },
+            timestamp: Date.now(),
+            userId
+          });
+          
+          // Also send disconnect notification
+          this.sendToClient(remainingPlayerId, {
+            type: 'PLAYER_LEFT',
+            data: {
+              playerId: userId,
+              username,
+              matchId,
+              remainingPlayers: match.players.size
+            },
+            timestamp: Date.now(),
+            userId
+          });
         } else {
+          // Multiple players remaining
           this.broadcastToMatch(matchId, {
             type: 'PLAYER_LEFT',
             data: {
@@ -212,6 +316,12 @@ class WebSocketServer {
   }
 
   public notifyMatchCompleted(matchId: string, winnerData: WinnerData): void {
+    const match = this.matches.get(matchId);
+    if (!match || match.players.size < 2) {
+      console.log(`Cannot complete match ${matchId} - insufficient players`);
+      return;
+    }
+
     this.broadcastToMatch(matchId, {
       type: 'MATCH_COMPLETED',
       data: {

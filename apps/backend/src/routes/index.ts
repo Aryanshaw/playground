@@ -7,9 +7,9 @@ import { WaitingRoomRoute } from "./waiting-room";
 import client from "@repo/db/client";
 import { getAuth } from "firebase-admin/auth";
 import { initializeApp, cert } from 'firebase-admin/app';
-import FirebaseMiddleware from "../middlewares/user"; // Import the fixed middleware
+import FirebaseMiddleware from "../middlewares/user"; 
 import dotenv from 'dotenv';
-dotenv.config(); // 👈 this loads .env into process.env
+dotenv.config(); 
 
 export const router = Router();
 
@@ -21,11 +21,11 @@ if (!privateKey) {
 
 const admin = initializeApp({
   credential: cert({
-    projectId:  process.env.FIREBASE_CLIENT_PROJECT_ID ||'',
+    projectId:  process.env.FIREBASE_CLIENT_PROJECT_ID || "",
     privateKey,
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
   }),
-  projectId: process.env.FIREBASE_CLIENT_PROJECT_ID || '',
+  projectId: process.env.FIREBASE_CLIENT_PROJECT_ID || "",
 });
 
 console.log("Private Key (first 50 chars):", process.env.FIREBASE_PRIVATE_KEY?.slice(0, 50));
@@ -33,7 +33,7 @@ console.log("Client Email:", process.env.FIREBASE_CLIENT_EMAIL);
 
 /**
  * SYNC FIREBASE USER TO LOCAL DATABASE
- */
+ * */
 router.post("/sync-user", async (req, res) => {
   try {
     const token = req.headers.authorization?.split("Bearer ")[1];

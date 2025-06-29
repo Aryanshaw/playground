@@ -2,6 +2,7 @@ import { Router } from "express";
 import client from "@repo/db/client";
 import FirebaseMiddleware from "../middlewares/user";
 import wsServer from "../utils/WebSocketServer";
+import { randomUUID } from "crypto";
 
 export const JoiningcodeMap = new Map(); // code -> { creatorId, expiry, matchId?, createdAt }
 
@@ -44,13 +45,16 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy", FirebaseMiddleware, asyn
       console.log("=== HANDLING CREATE ACTION ===");
       
       const joiningCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const matchId = randomUUID();
+
 
       JoiningcodeMap.set(joiningCode, {
         creatorId: userId,
         expiry: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes expiry
         createdAt: new Date(),
         Difficulty: Difficulty,
-        Topic: topic
+        Topic: topic,
+        matchId
       });
       
       console.log("Created joining code:", joiningCode);
@@ -60,9 +64,10 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy", FirebaseMiddleware, asyn
         wsServer.handleCodeShared(userId || "", joiningCode, { username: name || "Anonymous", code: joiningCode })};      
       
       res.status(200).json({ 
-        success: true, 
+        success: true,
+        matchId, 
         joiningCode, 
-        message: "Share this code with your buddy to join the match"
+        message: `Share ${joiningCode} with your buddy to join the match`
       });
       return;
     }
@@ -115,14 +120,14 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy", FirebaseMiddleware, asyn
       
       console.log("⚠️  Allowing same user to join for testing purposes");
 
-      if (codeData.matchId) {
-        console.log("❌ Game already in progress");
-        res.status(400).json({
-          success: false,
-          message: "This game is already in progress",
-        });
-        return
-      }
+      // if (codeData.matchId) {
+      //   console.log("❌ Game already in progress");
+      //   res.status(400).json({
+      //     success: false,
+      //     message: "This game is already in progress",
+      //   });
+      //   return
+      // }
 
       console.log("=== VALIDATING TOPIC AND DIFFICULTY ===");
       console.log("codeData info:", codeData.Difficulty, codeData.Topic);
@@ -191,6 +196,7 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy", FirebaseMiddleware, asyn
       }
 
       console.log("=== SEARCHING FOR QUESTION ===");
+
       console.log("Searching with topic:", topic[0], "difficulty:", Difficulty[0]);
 
       // THIS IS WHERE YOUR QUERY SHOULD HAPPEN
@@ -258,6 +264,7 @@ PlaygroundDashboardRoute.post("/match-with-your-buddy", FirebaseMiddleware, asyn
       // Create a match
       const match = await client.match.create({
         data: {
+          id: codeData.matchId,
           teamId: team.id,
           questionId: question.id,
           status: "ACTIVE",

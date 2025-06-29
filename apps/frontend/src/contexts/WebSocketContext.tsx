@@ -18,73 +18,89 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     user?.id
   );
 
-  // Helper functions for common actions
+  // Join a match - this will create the match on backend if it doesn't exist
   const joinMatch = (matchId: string) => {
+    if (!user?.id || !user?.name) {
+      console.error('User not authenticated');
+      return;
+    }
+
     const message: WebSocketMessage = {
       type: 'PLAYER_JOINED',
-      data: { matchId, userId: user?.id, username: user?.name },
-      timestamp: Date.now(),
-      matchId,
-      userId: user?.id
-    };
-    sendMessage(message);
-  };
-
-  const leaveMatch = (matchId: string) => {
-    const message: WebSocketMessage = {
-      type: 'PLAYER_LEFT',
-      data: { matchId, userId: user?.id, username: user?.name },
-      timestamp: Date.now(),
-      matchId,
-      userId: user?.id
-    };
-    sendMessage(message);
-  };
-
-  // Function to share joining code when match is created
-  const shareJoiningCode = (matchId: string, joiningCode: string) => {
-    const message: WebSocketMessage = {
-      type: 'CODE_SHARED',
-      data: {
-        matchId,
-        userId: user?.id,
-        username: user?.name,
-        joiningCode,
-        timestamp: Date.now()
+      data: { 
+        username: user.name,
+        matchId 
       },
       timestamp: Date.now(),
       matchId,
-      userId: user?.id
+      userId: user.id
     };
     sendMessage(message);
-    console.log("Sharing joining code:", joiningCode);
+    console.log(`Joining match ${matchId} as ${user.name}`);
   };
 
-  // Function to create match and share joining code
-  const createMatchAndShare = async (matchId: string) => {
-    try {
-      // Call your backend API to create match
-      const response = await fetch('/api/create-match', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ matchId, userId: user?.id })
-      });
-      
-      const result = await response.json();
-      
-      if (result.success && result.joiningCode) {
-        // Share the joining code via WebSocket
-        shareJoiningCode(matchId, result.joiningCode);
-        return result.joiningCode;
-      }
-      
-      throw new Error(result.message || 'Failed to create match');
-    } catch (error) {
-      console.error('Error creating match:', error);
-      throw error;
+  // Leave a match
+  const leaveMatch = (matchId: string) => {
+    if (!user?.id || !user?.name) {
+      console.error('User not authenticated');
+      return;
     }
+
+    const message: WebSocketMessage = {
+      type: 'PLAYER_LEFT',
+      data: { 
+        username: user.name,
+        matchId 
+      },
+      timestamp: Date.now(),
+      matchId,
+      userId: user.id
+    };
+    sendMessage(message);
+    console.log(`Leaving match ${matchId}`);
+  };
+
+  // Share joining code with other players in the match
+  const shareJoiningCode = (matchId: string, joiningCode: string) => {
+    if (!user?.id || !user?.name) {
+      console.error('User not authenticated');
+      return;
+    }
+
+    const message: WebSocketMessage = {
+      type: 'CODE_SHARED',
+      data: {
+        joiningCode,
+        username: user.name,
+        matchId
+      },
+      timestamp: Date.now(),
+      matchId,
+      userId: user.id
+    };
+    sendMessage(message);
+    console.log(`Sharing joining code ${joiningCode} in match ${matchId}`);
+  };
+
+  // Create or join a match with a specific code
+  const createOrJoinMatch = (matchId: string, joiningCode?: string) => {
+    // First join the match
+    joinMatch(matchId);
+    
+    // If we have a joining code to share, share it after joining
+    if (joiningCode) {
+      // Small delay to ensure join message is processed first
+      setTimeout(() => {
+        shareJoiningCode(matchId, joiningCode);
+      }, 100);
+    }
+  };
+
+  // Helper to check if user is in a specific match based on last message
+  const isUserInMatch = (matchId: string): boolean => {
+    // You can enhance this based on your app's state management
+    return lastMessage?.matchId === matchId && 
+           (lastMessage?.type === 'MATCH_READY' || lastMessage?.type === 'PLAYER_JOINED');
   };
 
   const contextValue: WebSocketContextType = {
@@ -95,7 +111,8 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     joinMatch,
     leaveMatch,
     shareJoiningCode,
-    createMatchAndShare,
+    createOrJoinMatch, // Renamed from createMatchAndShare
+    isUserInMatch
   };
 
   return (
